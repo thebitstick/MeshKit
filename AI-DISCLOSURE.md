@@ -30,6 +30,7 @@ what did not.
   against the simulators over TCP (`esp-sim`).
 - `MESHKIT_NETWORK_TESTS=1 swift test` reads the newest MeshCore and Meshtastic (stable and alpha) releases and checks
   that every file is understood and that install images for a Heltec V3 and a Wio Tracker L1 can be built.
+- GitHub Actions (`.github/workflows/check.yml`) builds, runs the tests and checks the app's code signature on a macOS runner; it passes.
 - On a real **Heltec V3**: Meshtastic installs (update and clean install) and MeshCore companion and repeater installs,
   and configuring each over USB.
 
@@ -38,7 +39,6 @@ what did not.
 - nRF52 UF2 installs on a real board, restoring a saved flash image on hardware, CH340 and native-USB ESP32 boards, and
   any chip other than the ESP32-S3 on the Heltec V3.
 - Developer ID signing and notarisation (`SIGN_IDENTITY`, `NOTARY_PROFILE` in `Scripts/package.sh`).
-- The GitHub Actions workflow, which could not be run from the development machine.
 
 ## Caveats
 
