@@ -229,10 +229,11 @@ private struct MeshCoreBoardDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(group.title).font(.title2.weight(.semibold))
-                    HStack(spacing: 6) {
-                        Text(subtitle(build)).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(group.title).font(.title2.weight(.semibold))
+                        if let build { FirmwareFilesMenu(artifacts: build.artifacts) }
                     }
+                    Text(subtitle(build)).foregroundStyle(.secondary)
                 }
 
                 if group.connections.count > 1 {
@@ -245,12 +246,6 @@ private struct MeshCoreBoardDetail: View {
                 } else if let only = group.connections.first {
                     Label("This board only has \(only.title) companion firmware. \(only.blurb)", systemImage: only.symbol)
                         .font(.callout).foregroundStyle(.secondary)
-                }
-
-                if let build {
-                    Card("Images", symbol: "doc.zipper") {
-                        ForEach(build.artifacts) { ArtifactRow(artifact: $0) }
-                    }
                 }
 
                 if let build, build.isESP32 || build.isUF2 {
@@ -332,38 +327,32 @@ private struct MeshtasticBoardDetail: View {
     }
 }
 
-struct ArtifactRow: View {
+/// The release's files for a board, for people who want to flash them with another tool.
+struct FirmwareFilesMenu: View {
     @Environment(AppModel.self) private var model
-    let artifact: FirmwareArtifact
+    let artifacts: [FirmwareArtifact]
 
     var body: some View {
         let fw = model.firmware
-        HStack {
-            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(artifact.kind.rawValue)
-                Text(artifact.asset.name).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        Menu {
+            Section("Firmware files") {
+                ForEach(artifacts) { artifact in
+                    let size = ByteCountFormatter.string(fromByteCount: Int64(artifact.asset.size), countStyle: .file)
+                    if fw.downloading.contains(artifact.id) {
+                        Text("Downloading \(artifact.kind.rawValue)…")
+                    } else if let url = fw.downloaded[artifact.id] {
+                        Button("Show \(artifact.kind.rawValue) in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                    } else {
+                        Button("Download \(artifact.kind.rawValue) (\(size))") { Task { _ = await fw.download(artifact) } }
+                    }
+                }
             }
-            Spacer()
-            Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.asset.size), countStyle: .file))
-                .font(.caption).foregroundStyle(.secondary)
-            if fw.downloading.contains(artifact.id) {
-                ProgressView().controlSize(.small)
-            } else if let url = fw.downloaded[artifact.id] {
-                Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-            } else {
-                Button("Download") { Task { _ = await fw.download(artifact) } }
-            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
-    }
-
-    private var symbol: String {
-        switch artifact.kind {
-        case .espFullImage: "memorychip.fill"
-        case .espAppImage: "memorychip"
-        case .uf2: "externaldrive"
-        case .nrfDFUPackage: "shippingbox"
-        case .other: "doc"
-        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Download the firmware files")
     }
 }
