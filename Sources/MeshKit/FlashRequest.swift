@@ -29,23 +29,30 @@ struct FlashRequest: Identifiable {
 
     @MainActor
     static func meshCore(_ group: FirmwareBoardGroup, connection: MeshCoreConnection?,
-                         release: GitHubRelease, model: AppModel) -> FlashRequest? {
+                         release: GitHubRelease, mode: MeshCoreInstallMode, model: AppModel) -> FlashRequest? {
         guard let build = group.build(for: connection), let artifact = build.fullImage else { return nil }
         let role = build.role.title
         let via = connection.map { " · \($0.title)" } ?? ""
         let isUF2 = artifact.kind == .uf2
         var request = FlashRequest(
             title: "Install \(group.title)",
-            subtitle: "MeshCore \(role)\(via) · v\(build.version)",
+            subtitle: "MeshCore \(role)\(via) · v\(build.version)\(isUF2 ? "" : " · \(mode.rawValue)")",
             target: isUF2 ? .uf2 : .esp,
             details: [artifact.asset.name],
             prepare: { _ in
                 guard let url = await model.firmware.download(artifact), let data = try? Data(contentsOf: url) else {
                     throw FlashPrepareError(message: await model.firmware.error ?? "Download failed")
                 }
-                return isUF2 ? .uf2(data) : .esp(.single(data, name: artifact.asset.name))
+                if isUF2 { return .uf2(data) }
+                return .esp(mode == .fresh
+                    ? MeshCoreImage.cleanJob(merged: data, name: artifact.asset.name)
+                    : try MeshCoreImage.updateJob(merged: data, name: artifact.asset.name))
             })
-        if !isUF2 { request.offersErase = true }
+        if !isUF2 {
+            request.warning = mode == .fresh
+                ? "A clean install erases the whole flash, including the node's identity key and settings. A backup of the current flash is saved first unless you turn that off."
+                : "The firmware is replaced and the node's settings and identity are kept. A backup of the current flash is saved first unless you turn that off."
+        }
         return request
     }
 

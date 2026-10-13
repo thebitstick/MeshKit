@@ -52,4 +52,26 @@ import Testing
         let wio = try #require(groups.first { $0.board == "WioTrackerL1" })
         #expect(wio.isUF2)
     }
+
+    @Test(arguments: MeshCoreRole.allCases)
+    func meshCoreUpdateKeepsTheApplicationIdenticalToTheAppOnlyFile(role: MeshCoreRole) async throws {
+        guard enabled else { return }
+        let client = ReleaseClient()
+        let release = try #require(try await client.releases(for: role, limit: 1).first)
+        let builds = ReleaseClient.builds(from: release, role: role)
+        var checked = 0
+        for board in ["heltec_v3", "xiao_c3", "heltec_v2", "lilygo_tdeck"] {
+            let candidates = builds.filter { $0.board.lowercased() == board && (role != .companion || $0.variant.contains("usb")) }
+            guard let build = candidates.first,
+                  let merged = build.artifacts.first(where: { $0.kind == .espFullImage }),
+                  let appOnly = build.artifacts.first(where: { $0.kind == .espAppImage }) else { continue }
+            let mergedData = try await URLSession.shared.data(from: merged.asset.browserDownloadUrl).0
+            let appData = try await URLSession.shared.data(from: appOnly.asset.browserDownloadUrl).0
+            let job = try MeshCoreImage.updateJob(merged: mergedData, name: merged.asset.name)
+            #expect(job.images.map(\.address) == [0xE000, 0x10000], "\(board) \(role)")
+            #expect(job.images[1].data == [UInt8](appData), "\(board) \(role)")
+            checked += 1
+        }
+        #expect(checked >= 2, "only \(checked) boards were checked")
+    }
 }

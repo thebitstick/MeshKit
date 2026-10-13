@@ -31,6 +31,7 @@ what did not.
 - `MESHKIT_NETWORK_TESTS=1 swift test` reads the newest MeshCore and Meshtastic (stable and alpha) releases and checks
   that every file is understood and that install images for a Heltec V3 and a Wio Tracker L1 can be built.
 - GitHub Actions (`.github/workflows/check.yml`) builds, runs the tests and checks the app's code signature on a macOS runner; it passes.
+- MeshCore's update and clean-install plans were checked against the real v1.17.1 images (partition layout, and that the application inside each merged image matches the app-only file) and against the simulated flasher (an update leaves the filesystem alone; a clean install erases it). They have not been run on a real board.
 - On a real **Heltec V3**: Meshtastic installs (update and clean install) and MeshCore companion and repeater installs,
   and configuring each over USB.
 

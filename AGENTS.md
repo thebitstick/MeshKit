@@ -65,6 +65,11 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
 - **Meshtastic install plans:** update writes the app at 0x10000; a clean install erases, then writes the factory image
   at 0x0, the OTA loader at the second app partition and the filesystem, offsets read from the board's `.mt.json`.
   Files are fetched by HTTP range from the per-platform zip; never download the whole archive.
+- **MeshCore install types:** published MeshCore ESP32 images are a 64 KiB header (bootloader, partition table at
+  0x8000, otadata at 0xE000) followed by the app at 0x10000, identical to the app-only file. *Update* writes otadata
+  plus the app, read out of the merged image after parsing its partition table, so nvs and the filesystem (identity,
+  settings) survive; resetting otadata makes the bootloader pick app0 even after an OTA. *Clean install* erases and
+  writes the merged image at 0x0. Only the merged image is downloaded. nRF52 UF2 has no erase.
 - **Meshtastic admin writes** go to our own node, reliable, with `from == 0`; the session key is only enforced for
   packets with `from != 0`; a managed node ignores local admin, and the app says so.
 - **Release data is untrusted.** Tag and asset names go through `ReleaseClient.safeComponent` before touching a

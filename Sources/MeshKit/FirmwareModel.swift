@@ -18,6 +18,7 @@ final class FirmwareModel {
     var selectedTag: String?
     var selectedBoardID: String?
     var preferredConnection: MeshCoreConnection = .ble
+    var mcMode: MeshCoreInstallMode = .update
 
     var channel: MeshtasticChannel = .stable
     var mtReleases: [MeshtasticRelease] = []
@@ -185,7 +186,7 @@ final class FirmwareModel {
     func meshCoreRequest(model: AppModel) -> FlashRequest? {
         guard let group = selectedGroup, let release = selectedRelease else { return nil }
         return .meshCore(group, connection: group.build(for: effectiveConnection(for: group))?.connection,
-                         release: release, model: model)
+                         release: release, mode: mcMode, model: model)
     }
 
     func meshtasticRequest() -> FlashRequest? {

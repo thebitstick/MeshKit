@@ -26,7 +26,7 @@ menu. The ESP32 flasher is written in Swift, so there's no `esptool`, Python or 
 | | MeshCore | Meshtastic |
 |---|---|---|
 | **Firmware** | Companion, repeater and room server releases | Stable and Alpha releases |
-| **Install** | ESP32 over serial, nRF52 via UF2 drive | ESP32 over serial (**Update** keeps settings, **Clean install** erases), nRF52 via UF2 |
+| **Install** | ESP32 over serial (**Update** keeps settings and identity, **Clean install** erases), nRF52 via UF2 drive | Same |
 | **Configure** | Companion (USB) and repeater / room server: name, location, radio, routing, adverts | Names, region, modem preset, hop limit, TX power, role |
 | **Radio presets** | Community presets by region, plus your own | Meshtastic's modem presets |
 | **Back up** | Settings snapshots and full ESP32 flash images | Same |

@@ -250,6 +250,14 @@ private struct MeshCoreBoardDetail: View {
                     }
                 }
 
+                if let build, build.isESP32, !build.isUF2 {
+                    Card("Install type", symbol: "arrow.triangle.2.circlepath") {
+                        ForEach(MeshCoreInstallMode.allCases) { mode in
+                            OptionCard(title: mode.rawValue, symbol: mode == .update ? "arrow.up.circle" : "sparkles", blurb: mode.blurb, selected: fw.mcMode == mode) { fw.mcMode = mode }
+                        }
+                    }
+                }
+
                 Card("Install", symbol: "bolt.fill", footnote: installFootnote(build)) {
                     Button { if let r = fw.meshCoreRequest(model: model) { model.pendingFlash = r } } label: {
                         Label("Install \(fw.role.title)\(connection.map { " · \($0.title)" } ?? "")…", systemImage: "square.and.arrow.down")
@@ -272,7 +280,7 @@ private struct MeshCoreBoardDetail: View {
         guard let build else { return "" }
         if build.isUF2 { return "Put the board in bootloader mode (double-tap reset) so its UF2 drive appears, then install." }
         if build.isESP32 {
-            return "Full images include bootloader, partitions and app, and are written at 0x0. App-only images are for updates that keep settings."
+            return "Only the full image is downloaded. An update writes just its boot-selection data and application; a clean install writes all of it at 0x0 after erasing the chip."
         }
         return ""
     }
