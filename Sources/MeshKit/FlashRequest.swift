@@ -1,0 +1,108 @@
+import MeshKitCore
+import SwiftUI
+
+enum FlashPayload {
+    case uf2(Data)
+    case esp(ESPFlashJob)
+}
+
+struct FlashContext {
+    var address: UInt32 = 0
+}
+
+struct FlashRequest: Identifiable {
+    enum Target { case uf2, esp }
+
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let target: Target
+    var prepareTitle = "Download the firmware"
+    var needsAddress = false
+    var offersErase = false
+    var eraseDefault = false
+    var warning: String?
+    var details: [String] = []
+    let prepare: @Sendable (FlashContext) async throws -> FlashPayload
+
+    // MARK: MeshCore
+
+    @MainActor
+    static func meshCore(_ group: FirmwareBoardGroup, connection: MeshCoreConnection?,
+                         release: GitHubRelease, model: AppModel) -> FlashRequest? {
+        guard let build = group.build(for: connection), let artifact = build.fullImage else { return nil }
+        let role = build.role.title
+        let via = connection.map { " · \($0.title)" } ?? ""
+        let isUF2 = artifact.kind == .uf2
+        var request = FlashRequest(
+            title: "Install \(group.title)",
+            subtitle: "MeshCore \(role)\(via) · v\(build.version)",
+            target: isUF2 ? .uf2 : .esp,
+            details: [artifact.asset.name],
+            prepare: { _ in
+                guard let url = await model.firmware.download(artifact), let data = try? Data(contentsOf: url) else {
+                    throw FlashPrepareError(message: await model.firmware.error ?? "Download failed")
+                }
+                return isUF2 ? .uf2(data) : .esp(.single(data, name: artifact.asset.name))
+            })
+        if !isUF2 { request.offersErase = true }
+        return request
+    }
+
+    // MARK: Meshtastic
+
+    static func meshtastic(_ board: MeshtasticBoard, release: MeshtasticRelease, mode: MeshtasticInstallMode) -> FlashRequest {
+        let catalog = MeshtasticCatalog()
+        var request = FlashRequest(
+            title: "Install \(board.displayName)",
+            subtitle: "Meshtastic \(release.version) (\(release.channel.rawValue)) · \(mode.rawValue)",
+            target: board.isNRF52 ? .uf2 : .esp,
+            prepareTitle: "Fetch the firmware files",
+            prepare: { _ in
+                let package = try catalog.package(for: board, in: release)
+                if board.isNRF52 { return .uf2(try await package.uf2Image()) }
+                return .esp(try await package.espJob(mode: mode))
+            })
+        if board.isESP32 {
+            request.warning = mode == .fresh
+                ? "A clean install erases the whole flash, including your settings, channels and keys. A backup of the current flash is saved first unless you turn that off."
+                : "The firmware is replaced and your settings are kept. A backup of the current flash is saved first unless you turn that off."
+        } else if mode == .fresh {
+            request.warning = "Clean installs aren't available for nRF52 boards yet: the UF2 replaces the firmware and your settings are kept."
+        }
+        return request
+    }
+
+    // MARK: Saved and local images
+
+    static func restore(_ entry: FlashBackupStore.Entry) -> FlashRequest {
+        FlashRequest(
+            title: "Restore \(entry.chip) flash image",
+            subtitle: "Saved \(entry.date.formatted(date: .abbreviated, time: .shortened)) · \(entry.size >> 20) MB",
+            target: .esp, prepareTitle: "Read the saved image",
+            warning: "This overwrites everything on the board with the saved image, including its settings and identity.",
+            prepare: { _ in .esp(.single(try Data(contentsOf: entry.url), name: entry.url.lastPathComponent)) })
+    }
+
+    static func localFile(_ url: URL) -> FlashRequest {
+        let isUF2 = url.pathExtension.lowercased() == "uf2"
+        var request = FlashRequest(
+            title: "Install \(url.lastPathComponent)",
+            subtitle: isUF2 ? "UF2 image from disk" : "Raw image from disk",
+            target: isUF2 ? .uf2 : .esp, prepareTitle: "Read the file",
+            prepare: { ctx in
+                let data = try Data(contentsOf: url)
+                return isUF2 ? .uf2(data) : .esp(.single(data, at: ctx.address, name: url.lastPathComponent))
+            })
+        request.needsAddress = !isUF2
+        if !isUF2 {
+            request.warning = "A raw .bin has no layout information. Full (\"merged\" or \"factory\") images go at 0x0; application-only images usually go at 0x10000. A wrong address can leave the board unbootable."
+        }
+        return request
+    }
+}
+
+struct FlashPrepareError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}

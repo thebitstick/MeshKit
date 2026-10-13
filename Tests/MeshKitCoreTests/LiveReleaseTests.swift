@@ -1,0 +1,55 @@
+import Foundation
+import Testing
+@testable import MeshKitCore
+
+/// Runs the whole pipeline against the newest published releases. Needs the network, so it only runs when
+/// MESHKIT_NETWORK_TESTS=1.
+@Suite struct LiveReleaseTests {
+    private var enabled: Bool { ProcessInfo.processInfo.environment["MESHKIT_NETWORK_TESTS"] == "1" }
+
+    @Test(arguments: MeshtasticChannel.allCases)
+    func meshtasticReleaseInstallsWithoutDownloadingTheWholeZip(channel: MeshtasticChannel) async throws {
+        guard enabled else { return }
+        let catalog = MeshtasticCatalog()
+        let release = try #require(try await catalog.releases(limit: 30).first { $0.channel == channel })
+        let boards = try await catalog.boards(in: release)
+        #expect(boards.count > 50)
+
+        let heltec = try #require(boards.first { $0.slug == "heltec-v3" })
+        #expect(heltec.displayName == "Heltec V3")
+        let pkg = try catalog.package(for: heltec, in: release)
+        let update = try await pkg.espJob(mode: .update)
+        #expect(update.images.count == 1 && update.images[0].address == 0x10000 && !update.eraseAll)
+        #expect(update.images[0].data.first == 0xE9)
+        let fresh = try await pkg.espJob(mode: .fresh)
+        #expect(fresh.eraseAll)
+        #expect(fresh.images.map(\.address) == [0, 0x340000, 0x670000])
+        #expect(fresh.images.last?.isApplication == false)
+        try ESPImageCheck.validate(fresh.images[0].data, at: 0, chip: .esp32s3, flashSize: 8 << 20)
+        #expect(throws: ESPError.self) { try ESPImageCheck.validate(fresh.images[0].data, at: 0, chip: .esp32c3, flashSize: 8 << 20) }
+
+        let wio = try #require(boards.first { $0.slug == "seeed_wio_tracker_L1" })
+        let uf2 = try await catalog.package(for: wio, in: release).uf2Image()
+        #expect(try UF2.inspect(uf2).isNRF52)
+    }
+
+    @Test(arguments: MeshCoreRole.allCases)
+    func meshCoreStableReleaseIsUnderstood(role: MeshCoreRole) async throws {
+        guard enabled else { return }
+        let release = try #require(try await ReleaseClient().releases(for: role, limit: 1).first)
+        let firmwareAssets = release.assets.filter { ["bin", "uf2", "zip"].contains(($0.name as NSString).pathExtension) }
+        #expect(!firmwareAssets.isEmpty)
+
+        let artifacts = firmwareAssets.compactMap { FirmwareArtifact.parse(asset: $0, role: role, releaseTag: release.tagName) }
+        let unparsed = firmwareAssets.filter { a in !artifacts.contains { $0.asset.id == a.id } }.map(\.name)
+        #expect(unparsed.isEmpty, "not understood: \(unparsed)")
+
+        let groups = FirmwareBoardGroup.groups(from: ReleaseClient.builds(from: release, role: role))
+        #expect(groups.count > 20)
+        let v3 = try #require(groups.first { $0.board.lowercased() == "heltec_v3" })
+        #expect(v3.isESP32 && v3.builds.allSatisfy { $0.fullImage != nil })
+        if role == .companion { #expect(Set(v3.connections) == [.usb, .ble]) }
+        let wio = try #require(groups.first { $0.board == "WioTrackerL1" })
+        #expect(wio.isUF2)
+    }
+}
