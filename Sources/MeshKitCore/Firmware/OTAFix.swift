@@ -25,6 +25,11 @@ public enum OTAFix {
         "nrf52_promicro_diy_tcxo": "promicro_nrf52840",
     ]
 
+    /// "OTAFIX2.2-BP1.3" from a bootloader line such as `UF2 Bootloader 0.9.2-OTAFIX2.2-BP1.3 lib/nrfx …`, or nil for other bootloaders.
+    public static func installedVersion(inBootloader text: String) -> String? {
+        text.firstMatch(of: #/OTAFIX\d+(?:\.\d+)*(?:-BP\d+(?:\.\d+)*)?/#).map { String($0.0) }
+    }
+
     public static func boardID(meshCoreSlug slug: String) -> String? { meshCore[slug.lowercased()] }
     public static func boardID(meshtasticSlug slug: String) -> String? { meshtastic[slug.lowercased()] }
 

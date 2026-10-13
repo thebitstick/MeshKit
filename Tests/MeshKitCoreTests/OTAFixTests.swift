@@ -12,6 +12,11 @@ import Testing
         #expect(OTAFix.boardID(meshtasticSlug: "tracker-t1000-e") == "t1000_e")
     }
 
+    @Test func readsTheInstalledBootloaderVersion() {
+        #expect(OTAFix.installedVersion(inBootloader: "UF2 Bootloader 0.9.2-OTAFIX2.2-BP1.3 lib/nrfx (v2.0.0)") == "OTAFIX2.2-BP1.3")
+        #expect(OTAFix.installedVersion(inBootloader: "UF2 Bootloader 0.9.2 lib/nrfx (v2.0.0)") == nil)
+    }
+
     @Test func boardsWithoutAKnownBootloaderGetNone() {
         #expect(OTAFix.boardID(meshCoreSlug: "Heltec_v3") == nil)
         #expect(OTAFix.boardID(meshtasticSlug: "heltec-v3") == nil)

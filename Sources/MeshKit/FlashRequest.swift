@@ -24,6 +24,8 @@ struct FlashRequest: Identifiable {
     var eraseDefault = false
     var warning: String?
     var details: [String] = []
+    /// Shown under the bootloader-drive picker for the drive that is selected.
+    var volumeNote: (@Sendable (UF2Volume) -> String?)?
     let prepare: @Sendable (FlashContext) async throws -> FlashPayload
 
     // MARK: MeshCore
@@ -96,6 +98,12 @@ struct FlashRequest: Identifiable {
             subtitle: "OTAFIX bootloader for \(boardName)",
             target: .uf2, prepareTitle: "Download the bootloader update",
             warning: "This replaces the board's bootloader with the OTAFIX build, which makes Bluetooth firmware updates more reliable. It is for \(boardName) only: the wrong file can leave a board that needs a hardware programmer to recover. Keep the board plugged in until it reboots. Your firmware and settings are not touched.",
+            volumeNote: { volume in
+                if let version = OTAFix.installedVersion(inBootloader: volume.bootloader) {
+                    return "\(volume.name) already runs the OTAFIX bootloader (\(version)). Install again only to move to the newest build."
+                }
+                return "\(volume.name) runs the standard bootloader: \(volume.bootloader.prefix(40))…"
+            },
             prepare: { _ in
                 let update = try await OTAFix.latestUpdate(for: boardID)
                 let url = try await OTAFix.download(update)

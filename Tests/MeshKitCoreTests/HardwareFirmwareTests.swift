@@ -204,4 +204,203 @@ import Testing
         print("ALPHA AFTER EDIT", state.owner?.longName ?? "nil", state.nodeID)
         await client.stop()
     }
+
+    /// Tries the MeshCore companion, the repeater console and Meshtastic in turn, the way the app does.
+    @Test func whatIsRunning() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "what" else { return }
+        let transport = try HardwareTests.openPort(path)
+        try await Task.sleep(for: .milliseconds(2500))
+        let mesh = MeshtasticClient(transport: transport, logger: { print("  log:", $0) })
+        if await mesh.probe(timeout: 4), let state = try? await mesh.connect() {
+            print("MESHTASTIC", state.nodeID, state.metadata?.firmwareVersion ?? "?", state.metadata?.hwModel ?? .unset, state.owner?.longName ?? "?")
+            await mesh.stop(); return
+        }
+        await mesh.stop()
+        let companion = CompanionClient(transport: transport, logger: { print("  log:", $0) })
+        await companion.start()
+        if let (info, me) = try? await companion.handshake() {
+            print("COMPANION", info.model, info.semanticVersion, me.name, me.publicKeyHex.prefix(12))
+            await companion.stop(); return
+        }
+        await companion.stop()
+        let cli = RepeaterCLIClient(transport: transport, logger: { print("  log:", $0) })
+        await cli.start()
+        print("CLI", try await cli.identify())
+        await cli.stop()
+    }
+
+    /// The standard "1200 baud touch": opening the port at 1200 baud and closing it reboots an Adafruit nRF52 board into its bootloader.
+    @Test func touchIntoBootloader() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "touch" else { return }
+        try await Task.sleep(for: .milliseconds(300))
+        let port = try SerialPort(path: path, baud: 1200)
+        try await Task.sleep(for: .milliseconds(500))
+        port.close()
+        for _ in 0..<40 {
+            if let v = UF2Volumes.detect().first {
+                print("VOLUME", v.name, "model:", v.model, "board:", v.boardID, "softdevice:", v.softDevice.debugDescription)
+                print("INFO", (try? String(contentsOf: v.url.appendingPathComponent("INFO_UF2.TXT"), encoding: .utf8)) ?? "?")
+                let current = try UF2Flasher.readCurrentImage(from: v)
+                try current.write(to: HardwareTests.out.appendingPathComponent("wio-current.uf2"))
+                print("CURRENT.UF2", current.count)
+                return
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        print("NO BOOTLOADER VOLUME")
+    }
+
+    @Test func nrfBackup() async throws {
+        guard HardwareTests.step == "nrf-backup" else { return }
+        let v = try #require(UF2Volumes.detect().first)
+        print("VOLUME", v.name, v.model, v.boardID, v.softDevice, v.bootloader.prefix(60))
+        let current = try UF2Flasher.readCurrentImage(from: v)
+        try current.write(to: HardwareTests.out.appendingPathComponent("wio-current.uf2"))
+        let info = try UF2.inspect(current)
+        print("CURRENT.UF2", current.count, info.familyName, String(info.lowestAddress, radix: 16), String(info.highestAddress, radix: 16), "payload", info.payloadBytes)
+    }
+
+    static func nrfVolume() throws -> UF2Volume { try #require(UF2Volumes.detect().first) }
+
+    static func meshCoreUF2(role: MeshCoreRole, board: String, variantContains: String? = nil) async throws -> (Data, String) {
+        let client = ReleaseClient()
+        let release = try #require(try await client.releases(for: role, limit: 1).first)
+        let builds = ReleaseClient.builds(from: release, role: role)
+        let build = try #require(builds.first { $0.board == board && (variantContains == nil || $0.variant.contains(variantContains!)) })
+        let artifact = try #require(build.artifacts.first { $0.kind == .uf2 })
+        return (try Data(contentsOf: try await client.download(artifact)), artifact.asset.name)
+    }
+
+    static func nrfFlash(_ image: Data, erase: NRF52EraseImages? = nil) async throws {
+        let volume = try nrfVolume()
+        print("FLASHING to", volume.name, volume.softDevice, "erase:", erase != nil)
+        let flasher = UF2VolumeFlasher(volume: volume, image: image, erase: erase)
+        try await flasher.run { id, state in
+            switch state {
+            case .done: print("  step \(id): done")
+            case .failed(let m): print("  step \(id): FAILED \(m)")
+            case .running(let p?): if Int(p * 100) % 50 == 0 { print("  step \(id): \(Int(p * 100))%") }
+            default: break
+            }
+        }
+    }
+
+    static func waitForPort(_ path: String, seconds: Int = 40) async throws {
+        for _ in 0..<(seconds * 2) {
+            if FileManager.default.fileExists(atPath: path) { try await Task.sleep(for: .seconds(1)); return }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        print("PORT NEVER APPEARED", path)
+    }
+
+    @Test func nrfCompanionInstall() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-companion" else { return }
+        let (image, name) = try await Self.meshCoreUF2(role: .companion, board: "WioTrackerL1", variantContains: "usb")
+        print("IMAGE", name, image.count)
+        try await Self.nrfFlash(image)
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(4))
+        print("PORTS", SerialDiscovery.list().map(\.path))
+        let (client, info, me) = try await Self.companion(path)
+        print("INFO", info.model, info.semanticVersion, "SELF", me.name, me.publicKeyHex.prefix(12), me.frequencyMHz, me.txPowerDBm, "max", me.maxTxPowerDBm)
+        print("BATTERY", try await client.battery())
+        try await client.setName("Wio Test")
+        let (_, changed) = try await client.handshake()
+        print("RENAMED", changed.name)
+        #expect(changed.name == "Wio Test")
+        try await client.setName(me.name)
+        await client.stop()
+        HardwareTests.closePorts()
+    }
+
+    static func waitForVolume(seconds: Int = 420) async throws {
+        print("WAITING FOR THE UF2 DRIVE (double-tap reset)")
+        for _ in 0..<(seconds * 2) {
+            if !UF2Volumes.detect().isEmpty { try await Task.sleep(for: .seconds(1)); return }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        Issue.record("no UF2 drive appeared")
+    }
+
+    static func eraseImages() async throws -> NRF52EraseImages {
+        let catalog = MeshtasticCatalog()
+        let release = try #require(try await catalog.releases(limit: 30).first { $0.channel == .stable })
+        return try await catalog.nrf52EraseImages(in: release)
+    }
+
+    @Test func nrfCleanCompanion() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-clean-companion" else { return }
+        try await Self.waitForVolume()
+        let (image, name) = try await Self.meshCoreUF2(role: .companion, board: "WioTrackerL1", variantContains: "usb")
+        print("IMAGE", name)
+        try await Self.nrfFlash(image, erase: try await Self.eraseImages())
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(4))
+        let (client, info, me) = try await Self.companion(path)
+        print("CLEAN INFO", info.semanticVersion, "SELF", me.name, me.publicKeyHex.prefix(12), "(before: 6ea6c6b08663)")
+        #expect(!me.publicKeyHex.hasPrefix("6ea6c6b08663"))
+        await client.stop()
+        HardwareTests.closePorts()
+    }
+
+    @Test func nrfMeshtasticClean() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-meshtastic-clean" else { return }
+        try await Self.waitForVolume()
+        let catalog = MeshtasticCatalog()
+        let release = try #require(try await catalog.releases(limit: 30).first { $0.channel == .stable })
+        let board = try #require(try await catalog.boards(in: release).first { $0.slug == "seeed_wio_tracker_L1" })
+        let image = try await catalog.package(for: board, in: release).uf2Image()
+        print("IMAGE", board.displayName, release.version, image.count)
+        try await Self.nrfFlash(image, erase: try await catalog.nrf52EraseImages(in: release))
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(8))
+        var (client, state) = try await Self.meshtastic(path)
+        print("MT STATE", state.nodeID, state.metadata?.firmwareVersion ?? "?", state.metadata?.hwModel ?? .unset, state.owner?.longName ?? "?", state.lora?.region ?? .unset)
+        try await client.apply(MeshtasticEdit(longName: "Wio Mesh Test", shortName: "WMT"))
+        await client.stop()
+        try await Task.sleep(for: .seconds(8))
+        (client, state) = try await Self.meshtastic(path)
+        print("MT RENAMED", state.owner?.longName ?? "?")
+        #expect(state.owner?.longName == "Wio Mesh Test")
+        await client.stop()
+        HardwareTests.closePorts()
+    }
+
+    @Test func nrfBootloaderFix() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-dfu" else { return }
+        try await Self.waitForVolume()
+        let before = try Self.nrfVolume()
+        print("BOOTLOADER BEFORE", before.bootloader.prefix(40))
+        let id = try #require(OTAFix.boardID(meshCoreSlug: "WioTrackerL1"))
+        let update = try await OTAFix.latestUpdate(for: id)
+        print("UPDATE", update.tag, update.asset.name)
+        let data = try Data(contentsOf: try await OTAFix.download(update))
+        let flasher = UF2VolumeFlasher(volume: before, image: data, content: .bootloaderUpdate)
+        try await flasher.run { step, state in print("  step \(step): \(state)") }
+        try await Task.sleep(for: .seconds(8))
+        print("VOLUMES AFTER", UF2Volumes.detect().map { "\($0.name) \($0.bootloader.prefix(40))" }, "PORTS", SerialDiscovery.list().map(\.path))
+        try await Self.waitForPort(path)
+    }
+
+    @Test func listenOnly() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "listen-only" else { return }
+        let transport = try HardwareTests.openPort(path)
+        let stream = transport.subscribe()
+        let collector = Task { var all = Data(); for await chunk in stream { all.append(chunk) }; return all }
+        try await Task.sleep(for: .seconds(5))
+        HardwareTests.closePorts()
+        let data = await collector.value
+        print("HEARD", data.count, String(decoding: data.prefix(400), as: UTF8.self).debugDescription)
+    }
+
+    @Test func nrfRestoreOriginal() async throws {
+        guard HardwareTests.step == "nrf-restore" else { return }
+        try await Self.waitForVolume()
+        let v = try Self.nrfVolume()
+        print("BOOTLOADER NOW", v.bootloader.prefix(45), "installed:", OTAFix.installedVersion(inBootloader: v.bootloader) ?? "none")
+        let original = try Data(contentsOf: HardwareTests.out.appendingPathComponent("wio-current.uf2"))
+        print("RESTORING", original.count)
+        let outcome = try await UF2Flasher.flash(image: original, to: v) { _ in }
+        print("OUTCOME", outcome)
+    }
 }

@@ -56,13 +56,21 @@ public struct UF2VolumeFlasher: Flasher {
     public let erase: NRF52EraseImages?
     public let content: Content
     private let findVolumes: @Sendable () -> [UF2Volume]
+    private let candidatePorts: @Sendable () -> [String]
+    private let holdPort: @Sendable (String, Duration) async -> Void
     private let returnTimeout: Duration
 
     public init(volume: UF2Volume, image: Data, erase: NRF52EraseImages? = nil, content: Content = .application,
                 findVolumes: @escaping @Sendable () -> [UF2Volume] = { UF2Volumes.detect() },
-                returnTimeout: Duration = .seconds(60)) {
+                candidatePorts: @escaping @Sendable () -> [String] = { SerialDiscovery.list().map(\.path).filter { $0.contains("usbmodem") } },
+                holdPort: @escaping @Sendable (String, Duration) async -> Void = { path, duration in
+                    guard let port = try? SerialPort(path: path) else { try? await Task.sleep(for: duration); return }
+                    try? await Task.sleep(for: duration)
+                    port.close()
+                },
+                returnTimeout: Duration = .seconds(90)) {
         self.volume = volume; self.image = image; self.erase = erase; self.content = content
-        self.findVolumes = findVolumes; self.returnTimeout = returnTimeout
+        self.findVolumes = findVolumes; self.candidatePorts = candidatePorts; self.holdPort = holdPort; self.returnTimeout = returnTimeout
     }
 
     public var steps: [FlashStep] {
@@ -127,11 +135,17 @@ public struct UF2VolumeFlasher: Flasher {
         }
     }
 
+    /// The erase tool is an Arduino program that waits for a host to open its USB serial port before it formats the
+    /// flash and reboots into the bootloader, so while waiting for the drive the port is opened now and then.
     private func waitForBootloader(like old: UF2Volume) async throws -> UF2Volume? {
         let deadline = ContinuousClock.now + returnTimeout
         while ContinuousClock.now < deadline {
             if let back = findVolumes().first(where: { $0.boardID == old.boardID && $0.model == old.model }) { return back }
-            try await Task.sleep(for: .milliseconds(500))
+            if let port = candidatePorts().first {
+                await holdPort(port, .seconds(4))
+            } else {
+                try await Task.sleep(for: .milliseconds(500))
+            }
         }
         return nil
     }

@@ -72,7 +72,7 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   0x8000, otadata at 0xE000) followed by the app at 0x10000, identical to the app-only file. *Update* writes otadata
   plus the app, read out of the merged image after parsing its partition table, so nvs and the filesystem (identity,
   settings) survive; resetting otadata makes the bootloader pick app0 even after an OTA. *Clean install* erases and
-  writes the merged image at 0x0. Only the merged image is downloaded. nRF52 UF2 has no erase of its own: a *Clean install* there first copies Meshtastic's `Meshtastic_nRF52_factory_erase_v3_S140_<7.3.0|6.1.0>.uf2` (read by range from a Meshtastic release's nrf52840 zip; MeshCore uses the latest stable Meshtastic release) to the bootloader drive, waits for the drive to come back, then copies the firmware. The file is chosen from the `SoftDevice:` line of `INFO_UF2.TXT`; if that is missing or unknown the clean install refuses.
+  writes the merged image at 0x0. Only the merged image is downloaded. nRF52 UF2 has no erase of its own: a *Clean install* there first copies Meshtastic's `Meshtastic_nRF52_factory_erase_v3_S140_<7.3.0|6.1.0>.uf2` (read by range from a Meshtastic release's nrf52840 zip; MeshCore uses the latest stable Meshtastic release) to the bootloader drive, waits for the drive to come back, then copies the firmware. The file is chosen from the `SoftDevice:` line of `INFO_UF2.TXT` (real boards print it, e.g. `S140 7.3.0`); if that is missing or unknown the clean install refuses. The erase tool is an Arduino program that does nothing until a host opens its USB serial port, then prints `Formating ... Done, rebooting device into DFU mode` and returns the board to the bootloader, so `UF2VolumeFlasher` opens the `usbmodem` port every few seconds while waiting for the drive.
 - **DFU bootloader fix (nRF52):** the three-dot menu offers the OTAFIX bootloader (`oltaco/Adafruit_nRF52_Bootloader_OTAFIX`,
   recommended by MeshCore's FAQ). Per-board `update-<board>_bootloader-…_nosd.uf2` files are copied to the UF2 drive like
   firmware; their UF2 family is `0xD663823C`, not nRF52840, so `UF2VolumeFlasher(content: .bootloaderUpdate)` checks for
@@ -95,6 +95,11 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   repeater CLI answers with a line prefixed `->` or `>` and has no end-of-reply marker; MeshKit waits for quiet.
   Four companion commands are marked `UNVERIFIED` in `CompanionProtocol.swift`; confirm them against firmware before
   claiming support.
+- nRF52 on a Wio Tracker L1 (checked on hardware): the 1200-baud touch does not enter the bootloader, so the user has to
+  double-tap reset; the `usbmodem` path stays the same in and out of the bootloader; `INFO_UF2.TXT` has `Model`,
+  `Board-ID`, `SoftDevice` and a first line like `UF2 Bootloader 0.9.2-OTAFIX2.2-BP1.3 …` (so the installed OTAFIX
+  version is known); `CURRENT.UF2` holds SoftDevice and app (family `0x28861667`, which `UF2VolumeFlasher` refuses, but
+  copying it back as `NEW.UF2` restores the board).
 - Meshtastic stream API: `0x94 0xC3`, big-endian 16-bit length, protobuf. Waking a node takes a run of `0xC3`.
 - MeshCore releases are per role, tagged `companion-vX`, `repeater-vX`, `room-server-vX`. Companion builds come in `usb`
   and `ble` variants; repeaters and room servers have one build per board.
@@ -115,7 +120,7 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
 - **Never touch the user's uncommitted work.** Do not `git stash`, `reset` or `checkout` to compare things.
 - **Be honest about verification.** Say what was tested and what was not. Only the Heltec V3 (Meshtastic including a
   clean install, MeshCore companion and repeater) has run on real hardware; say so rather than implying more.
-  Not tried on hardware: nRF52 UF2 installs, CH340 and native-USB ESP32 boards, the
+  Not tried on hardware: CH340 and native-USB ESP32 boards, the
   Developer ID signing and notarisation path.
 - **No comments unless the code is not self-explanatory.** Comment only a non-obvious *why* (a protocol quirk, a
   SwiftUI workaround), never what the code already says.

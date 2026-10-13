@@ -52,7 +52,7 @@ swift test
 | Chip | Install | Status |
 |---|---|---|
 | ESP32, S2, **S3**, C2, C3, C6, H2 | Serial | Tested on a **Heltec V3**: Meshtastic (including clean install) and MeshCore companion and repeater, flashed and configured; MeshCore Update, Clean install and restoring a full flash backup |
-| nRF52840 (e.g. Wio Tracker L1) | UF2 drive | Unit-tested; not tried on a real board (including the clean-install erase and the bootloader fix) |
+| nRF52840 (e.g. Wio Tracker L1) | UF2 drive | Tested on a **Wio Tracker L1**: MeshCore companion and Meshtastic installs, clean install (erase tool) and the OTAFIX bootloader update |
 | ESP32-P4, RP2040 / RP2350, STM32 | | Not supported |
 
 ## Safety

@@ -31,6 +31,7 @@ import Testing
         let volume = UF2Volumes.parse(infoText: infoText, url: first)
 
         let received = Locked<[Data]>([])
+        let poked = Locked<[String]>([])
         let board = Task {
             for dir in [first, second] {
                 let file = dir.appendingPathComponent("NEW.UF2")
@@ -39,7 +40,7 @@ import Testing
                 received.value.append(try Data(contentsOf: file))
                 try FileManager.default.removeItem(at: dir)
                 if dir == first {
-                    try await Task.sleep(for: .milliseconds(700))
+                    while poked.value.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
                     try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
                     try writeInfo(second)
                 }
@@ -47,13 +48,17 @@ import Testing
         }
 
         let flasher = UF2VolumeFlasher(volume: volume, image: firmware, erase: NRF52EraseImages(images: ["7.3": eraseImage]),
-                                       findVolumes: { UF2Volumes.detect(volumesRoot: root) }, returnTimeout: .seconds(10))
+                                       findVolumes: { UF2Volumes.detect(volumesRoot: root) },
+                                       candidatePorts: { ["/dev/cu.usbmodemFAKE"] },
+                                       holdPort: { path, _ in poked.value.append(path); try? await Task.sleep(for: .milliseconds(50)) },
+                                       returnTimeout: .seconds(10))
         #expect(flasher.steps.map(\.id) == ["verify", "erase", "return", "write", "reboot"])
         let states = Locked<[String: FlashStep.State]>([:])
         try await flasher.run { id, state in states.value[id] = state }
         try await board.value
 
         #expect(received.value == [eraseImage, firmware])
+        #expect(poked.value.first == "/dev/cu.usbmodemFAKE")
         for id in ["verify", "erase", "return", "write", "reboot"] { #expect(states.value[id] == FlashStep.State.done, "\(id)") }
     }
 
