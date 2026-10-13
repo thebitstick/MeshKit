@@ -74,7 +74,8 @@ import Testing
 
     @Test func radioParamsEncoding() {
         let p = CompanionRequest.setRadioParams(frequencyMHz: 869.525, bandwidthKHz: 250, spreadingFactor: 11, codingRate: 5)
-        #expect(p == [11] + [0x95, 0x44, 0x0D, 0x00] + [0x90, 0xD0, 0x03, 0x00] + [11, 5])
+        let expected: [UInt8] = [11, 0x95, 0x44, 0x0D, 0x00, 0x90, 0xD0, 0x03, 0x00, 11, 5]
+        #expect(p == expected)
     }
 
     @Test func advertNameIsTruncated() {
