@@ -101,7 +101,7 @@ public struct UF2VolumeFlasher: Flasher {
         var eraseImage: Data?
         if let erase {
             guard let found = erase.image(for: volume) else {
-                let msg = "This bootloader reports SoftDevice \"\(volume.softDevice)\", and no matching erase file is available."
+                let msg = "This bootloader reports Bluetooth stack version \"\(volume.softDevice)\", and no matching erase file is available."
                 update("verify", .failed(msg))
                 throw UF2Error.writeFailed(msg)
             }

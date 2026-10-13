@@ -153,7 +153,7 @@ struct FlashRequest: Identifiable {
             title: "Restore \(entry.board) firmware",
             subtitle: "Saved \(entry.date.formatted(date: .abbreviated, time: .shortened)) · \(entry.size >> 10) KB",
             target: .uf2, prepareTitle: "Read the saved image",
-            warning: "This puts the SoftDevice and application back as they were when the image was saved. The bootloader is not touched. Settings stored after the image was saved are not part of it.",
+            warning: "This puts the board's Bluetooth firmware and application back as they were when the image was saved. The bootloader is not touched. Settings stored after the image was saved are not part of it.",
             allowsBackup: false,
             prepare: { _ in .uf2Restore(try Data(contentsOf: entry.url)) })
     }

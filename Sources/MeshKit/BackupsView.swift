@@ -99,7 +99,7 @@ struct BackupsView: View {
 
     private var nrfBackupCard: some View {
         Card("nRF52 firmware", symbol: "memorychip",
-             footnote: "The SoftDevice and application on an nRF52 board, saved from its bootloader drive before each UF2 install. They don't include the board's settings.") {
+             footnote: "The firmware on an nRF52 board (its Bluetooth stack and application), saved from its bootloader drive before each UF2 install. They don't include the board's settings.") {
             if model.nrfBackups.isEmpty {
                 EmptyRow(text: "None yet. They appear here after a UF2 install on an nRF52 board with the backup option on.")
             }
