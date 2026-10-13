@@ -31,6 +31,10 @@ import Testing
         let wio = try #require(boards.first { $0.slug == "seeed_wio_tracker_L1" })
         let uf2 = try await catalog.package(for: wio, in: release).uf2Image()
         #expect(try UF2.inspect(uf2).isNRF52)
+
+        let erase = try await catalog.nrf52EraseImages(in: release)
+        #expect(erase.images.keys.sorted() == ["6.1", "7.3"])
+        for image in erase.images.values { #expect(try UF2.inspect(image).isNRF52) }
     }
 
     @Test(arguments: MeshCoreRole.allCases)

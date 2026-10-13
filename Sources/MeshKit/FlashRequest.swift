@@ -2,7 +2,7 @@ import MeshKitCore
 import SwiftUI
 
 enum FlashPayload {
-    case uf2(Data)
+    case uf2(Data, erase: NRF52EraseImages?)
     case esp(ESPFlashJob)
 }
 
@@ -36,22 +36,27 @@ struct FlashRequest: Identifiable {
         let isUF2 = artifact.kind == .uf2
         var request = FlashRequest(
             title: "Install \(group.title)",
-            subtitle: "MeshCore \(role)\(via) · v\(build.version)\(isUF2 ? "" : " · \(mode.rawValue)")",
+            subtitle: "MeshCore \(role)\(via) · v\(build.version) · \(mode.rawValue)",
             target: isUF2 ? .uf2 : .esp,
             details: [artifact.asset.name],
             prepare: { _ in
                 guard let url = await model.firmware.download(artifact), let data = try? Data(contentsOf: url) else {
                     throw FlashPrepareError(message: await model.firmware.error ?? "Download failed")
                 }
-                if isUF2 { return .uf2(data) }
+                if isUF2 { return .uf2(data, erase: mode == .fresh ? try await meshtasticEraseImages() : nil) }
                 return .esp(mode == .fresh
                     ? MeshCoreImage.cleanJob(merged: data, name: artifact.asset.name)
                     : try MeshCoreImage.updateJob(merged: data, name: artifact.asset.name))
             })
-        if !isUF2 {
+        let kept = "The firmware is replaced and the node's settings and identity are kept."
+        if isUF2 {
+            request.warning = mode == .fresh
+                ? "A clean install first runs Meshtastic's nRF52 erase tool, which wipes the board's firmware, identity key and settings, then installs this firmware. The erase tool is downloaded from Meshtastic's latest release. There is no flash backup for nRF52 boards."
+                : kept
+        } else {
             request.warning = mode == .fresh
                 ? "A clean install erases the whole flash, including the node's identity key and settings. A backup of the current flash is saved first unless you turn that off."
-                : "The firmware is replaced and the node's settings and identity are kept. A backup of the current flash is saved first unless you turn that off."
+                : "\(kept) A backup of the current flash is saved first unless you turn that off."
         }
         return request
     }
@@ -67,15 +72,17 @@ struct FlashRequest: Identifiable {
             prepareTitle: "Fetch the firmware files",
             prepare: { _ in
                 let package = try catalog.package(for: board, in: release)
-                if board.isNRF52 { return .uf2(try await package.uf2Image()) }
+                if board.isNRF52 { return .uf2(try await package.uf2Image(), erase: mode == .fresh ? try await catalog.nrf52EraseImages(in: release) : nil) }
                 return .esp(try await package.espJob(mode: mode))
             })
         if board.isESP32 {
             request.warning = mode == .fresh
                 ? "A clean install erases the whole flash, including your settings, channels and keys. A backup of the current flash is saved first unless you turn that off."
                 : "The firmware is replaced and your settings are kept. A backup of the current flash is saved first unless you turn that off."
-        } else if mode == .fresh {
-            request.warning = "Clean installs aren't available for nRF52 boards yet: the UF2 replaces the firmware and your settings are kept."
+        } else {
+            request.warning = mode == .fresh
+                ? "A clean install first runs Meshtastic's nRF52 erase tool, which wipes the board's firmware, settings, channels and keys, then installs this firmware. There is no flash backup for nRF52 boards."
+                : "The firmware is replaced and your settings are kept."
         }
         return request
     }
@@ -99,7 +106,7 @@ struct FlashRequest: Identifiable {
             target: isUF2 ? .uf2 : .esp, prepareTitle: "Read the file",
             prepare: { ctx in
                 let data = try Data(contentsOf: url)
-                return isUF2 ? .uf2(data) : .esp(.single(data, at: ctx.address, name: url.lastPathComponent))
+                return isUF2 ? .uf2(data, erase: nil) : .esp(.single(data, at: ctx.address, name: url.lastPathComponent))
             })
         request.needsAddress = !isUF2
         if !isUF2 {
@@ -112,4 +119,13 @@ struct FlashRequest: Identifiable {
 struct FlashPrepareError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
+}
+
+private func meshtasticEraseImages() async throws -> NRF52EraseImages {
+    let catalog = MeshtasticCatalog()
+    let releases = try await catalog.releases(limit: 30)
+    guard let release = releases.first(where: { $0.channel == .stable }) ?? releases.first else {
+        throw FlashPrepareError(message: "Couldn't find a Meshtastic release to take the erase tool from.")
+    }
+    return try await catalog.nrf52EraseImages(in: release)
 }

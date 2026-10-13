@@ -80,6 +80,11 @@ public struct UF2Volume: Identifiable, Hashable, Sendable {
     public let model: String
     public let boardID: String
     public let bootloader: String
+    public let softDevice: String
+
+    public init(url: URL, model: String, boardID: String, bootloader: String, softDevice: String = "") {
+        self.url = url; self.model = model; self.boardID = boardID; self.bootloader = bootloader; self.softDevice = softDevice
+    }
 
     public var id: String { url.path }
     public var name: String { url.lastPathComponent }
@@ -101,7 +106,7 @@ public enum UF2Volumes {
             lines.first { $0.hasPrefix(key + ":") }
                 .map { String($0.dropFirst(key.count + 1)).trimmingCharacters(in: .whitespaces) } ?? ""
         }
-        return UF2Volume(url: url, model: field("Model"), boardID: field("Board-ID"), bootloader: lines.first ?? "")
+        return UF2Volume(url: url, model: field("Model"), boardID: field("Board-ID"), bootloader: lines.first ?? "", softDevice: field("SoftDevice"))
     }
 }
 

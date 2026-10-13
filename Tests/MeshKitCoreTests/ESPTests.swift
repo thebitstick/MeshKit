@@ -385,7 +385,7 @@ import Testing
     }
 }
 
-private final class Locked<T>: @unchecked Sendable {
+final class Locked<T>: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: T
     init(_ v: T) { stored = v }

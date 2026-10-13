@@ -69,7 +69,7 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   0x8000, otadata at 0xE000) followed by the app at 0x10000, identical to the app-only file. *Update* writes otadata
   plus the app, read out of the merged image after parsing its partition table, so nvs and the filesystem (identity,
   settings) survive; resetting otadata makes the bootloader pick app0 even after an OTA. *Clean install* erases and
-  writes the merged image at 0x0. Only the merged image is downloaded. nRF52 UF2 has no erase.
+  writes the merged image at 0x0. Only the merged image is downloaded. nRF52 UF2 has no erase of its own: a *Clean install* there first copies Meshtastic's `Meshtastic_nRF52_factory_erase_v3_S140_<7.3.0|6.1.0>.uf2` (read by range from a Meshtastic release's nrf52840 zip; MeshCore uses the latest stable Meshtastic release) to the bootloader drive, waits for the drive to come back, then copies the firmware. The file is chosen from the `SoftDevice:` line of `INFO_UF2.TXT`; if that is missing or unknown the clean install refuses.
 - **Meshtastic admin writes** go to our own node, reliable, with `from == 0`; the session key is only enforced for
   packets with `from != 0`; a managed node ignores local admin, and the app says so.
 - **Release data is untrusted.** Tag and asset names go through `ReleaseClient.safeComponent` before touching a

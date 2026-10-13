@@ -134,9 +134,9 @@ struct FlashSheet: View {
 
         let flasher: Flasher
         switch payload {
-        case .uf2(let data):
+        case .uf2(let data, let erase):
             guard let volume else { failure = "No bootloader drive is mounted."; return }
-            flasher = UF2VolumeFlasher(volume: volume, image: data)
+            flasher = UF2VolumeFlasher(volume: volume, image: data, erase: erase)
         case .esp(var job):
             guard let port else { failure = "No serial port is selected."; return }
             if request.offersErase { job.eraseAll = eraseFirst }

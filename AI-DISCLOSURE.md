@@ -37,7 +37,7 @@ what did not.
 
 ## What was not tested
 
-- nRF52 UF2 installs on a real board, restoring a saved flash image on hardware, CH340 and native-USB ESP32 boards, and
+- nRF52 UF2 installs on a real board (including the clean-install erase: that the bootloader's `INFO_UF2.TXT` really reports its SoftDevice, and that the erase file behaves as described, is untested), restoring a saved flash image on hardware, CH340 and native-USB ESP32 boards, and
   any chip other than the ESP32-S3 on the Heltec V3.
 - Developer ID signing and notarisation (`SIGN_IDENTITY`, `NOTARY_PROFILE` in `Scripts/package.sh`).
 

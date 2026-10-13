@@ -189,6 +189,18 @@ public struct MeshtasticCatalog: Sendable {
         .sorted { ($0.supportLevel ?? 9, $0.displayName.lowercased()) < ($1.supportLevel ?? 9, $1.displayName.lowercased()) }
     }
 
+    /// The factory-erase UF2 files shipped in a release's nRF52 package. Older releases may lack them.
+    public func nrf52EraseImages(in release: MeshtasticRelease) async throws -> NRF52EraseImages {
+        guard let asset = release.platformZip("nrf52840") else { throw MeshtasticError.missingAsset("firmware-nrf52840-\(release.version).zip") }
+        let zip = RemoteZip(url: asset.browserDownloadUrl, size: asset.size)
+        var found: [String: Data] = [:]
+        for (series, file) in NRF52EraseImages.fileNames {
+            if let data = try? await zip.read(file) { found[series] = data }
+        }
+        guard !found.isEmpty else { throw MeshtasticError.missingAsset(NRF52EraseImages.fileNames["7.3"] ?? "erase file") }
+        return NRF52EraseImages(images: found)
+    }
+
     public func package(for board: MeshtasticBoard, in release: MeshtasticRelease) throws -> MeshtasticPackage {
         guard board.isFlashable else { throw MeshtasticError.unsupportedPlatform(board.architectureLabel) }
         guard let zip = release.platformZip(board.platform) else { throw MeshtasticError.missingAsset("firmware-\(board.platform)-\(release.version).zip") }

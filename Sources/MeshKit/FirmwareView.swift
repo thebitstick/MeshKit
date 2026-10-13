@@ -192,23 +192,26 @@ struct OptionCard: View {
     let symbol: String
     let blurb: String
     let selected: Bool
+    var destructive = false
     let action: () -> Void
+
+    private var tint: Color { destructive ? .red : .accentColor }
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol).font(.title2).frame(width: 30).foregroundStyle(selected ? Color.accentColor : .secondary)
+                Image(systemName: symbol).font(.title2).frame(width: 30).foregroundStyle(destructive ? Color.red : selected ? Color.accentColor : .secondary)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.headline)
                     Text(blurb).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(selected ? Color.accentColor : .secondary.opacity(0.5))
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(selected ? tint : destructive ? Color.red.opacity(0.5) : .secondary.opacity(0.5))
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? Color.accentColor.opacity(0.10) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color.accentColor.opacity(0.6) : .clear, lineWidth: 1.5))
+            .background(selected ? tint.opacity(0.12) : destructive ? Color.red.opacity(0.06) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? tint.opacity(0.7) : destructive ? Color.red.opacity(0.25) : .clear, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -250,10 +253,10 @@ private struct MeshCoreBoardDetail: View {
                     }
                 }
 
-                if let build, build.isESP32, !build.isUF2 {
+                if let build, build.isESP32 || build.isUF2 {
                     Card("Install type", symbol: "arrow.triangle.2.circlepath") {
                         ForEach(MeshCoreInstallMode.allCases) { mode in
-                            OptionCard(title: mode.rawValue, symbol: mode == .update ? "arrow.up.circle" : "sparkles", blurb: mode.blurb, selected: fw.mcMode == mode) { fw.mcMode = mode }
+                            OptionCard(title: mode.rawValue, symbol: mode == .update ? "arrow.up.circle" : "sparkles", blurb: mode.blurb, selected: fw.mcMode == mode, destructive: mode == .fresh) { fw.mcMode = mode }
                         }
                     }
                 }
@@ -278,7 +281,7 @@ private struct MeshCoreBoardDetail: View {
 
     private func installFootnote(_ build: FirmwareBuild?) -> String {
         guard let build else { return "" }
-        if build.isUF2 { return "Put the board in bootloader mode (double-tap reset) so its UF2 drive appears, then install." }
+        if build.isUF2 { return "Put the board in bootloader mode (double-tap reset) so its UF2 drive appears, then install. A clean install first runs Meshtastic's erase tool, so it needs a Meshtastic release to download it from." }
         if build.isESP32 {
             return "Only the full image is downloaded. An update writes just its boot-selection data and application; a clean install writes all of it at 0x0 after erasing the chip."
         }
@@ -305,16 +308,11 @@ private struct MeshtasticBoardDetail: View {
                     }
                 }
 
-                if board.isESP32 {
-                    Card("Install type", symbol: "arrow.triangle.2.circlepath") {
-                        ForEach(MeshtasticInstallMode.allCases) { mode in
-                            OptionCard(title: mode.rawValue, symbol: mode == .update ? "arrow.up.circle" : "sparkles", blurb: mode.blurb, selected: fw.mtMode == mode) { fw.mtMode = mode }
-                        }
+                Card("Install type", symbol: "arrow.triangle.2.circlepath",
+                     footnote: board.isNRF52 ? "nRF52 boards install from a UF2 file: double-tap reset so the board's drive appears, then install." : nil) {
+                    ForEach(MeshtasticInstallMode.allCases) { mode in
+                        OptionCard(title: mode.rawValue, symbol: mode == .update ? "arrow.up.circle" : "sparkles", blurb: mode.blurb, selected: fw.mtMode == mode, destructive: mode == .fresh) { fw.mtMode = mode }
                     }
-                } else {
-                    Label("nRF52 boards install from a UF2 file. Double-tap reset so the board's drive appears, then install. Settings are kept.",
-                          systemImage: "externaldrive")
-                        .font(.callout).foregroundStyle(.secondary)
                 }
 
                 Card("Install", symbol: "bolt.fill", footnote: "Only this board's files are downloaded, not the whole multi-board package, and each is checked against the checksum published with the release.") {

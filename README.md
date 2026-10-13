@@ -26,7 +26,7 @@ menu. The ESP32 flasher is written in Swift, so there's no `esptool`, Python or 
 | | MeshCore | Meshtastic |
 |---|---|---|
 | **Firmware** | Companion, repeater and room server releases | Stable and Alpha releases |
-| **Install** | ESP32 over serial (**Update** keeps settings and identity, **Clean install** erases), nRF52 via UF2 drive | Same |
+| **Install** | ESP32 over serial (**Update** keeps settings and identity, **Clean install** erases), nRF52 via UF2 drive (Clean install runs Meshtastic's erase tool first) | Same |
 | **Configure** | Companion (USB) and repeater / room server: name, location, radio, routing, adverts | Names, region, modem preset, hop limit, TX power, role |
 | **Radio presets** | Community presets by region, plus your own | Meshtastic's modem presets |
 | **Back up** | Settings snapshots and full ESP32 flash images | Same |
@@ -52,7 +52,7 @@ swift test
 | Chip | Install | Status |
 |---|---|---|
 | ESP32, S2, **S3**, C2, C3, C6, H2 | Serial | Tested on a **Heltec V3**: Meshtastic (including clean install) and MeshCore companion and repeater, flashed and configured |
-| nRF52840 (e.g. Wio Tracker L1) | UF2 drive | Unit-tested; not tried on a real board |
+| nRF52840 (e.g. Wio Tracker L1) | UF2 drive | Unit-tested; not tried on a real board (including the clean-install erase) |
 | ESP32-P4, RP2040 / RP2350, STM32 | | Not supported |
 
 ## Safety
