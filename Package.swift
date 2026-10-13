@@ -11,6 +11,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.38.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", .upToNextMinor(from: "2.9.6")),
     ],
     targets: [
         // Generated from Meshtastic's GPL-3.0 protobuf definitions; see Sources/MeshtasticProtobufs/NOTICE.md.
@@ -18,7 +19,7 @@ let package = Package(
                 exclude: ["NOTICE.md", "LICENSE-GPL-3.0"]),
         .target(name: "MeshKitCore", dependencies: ["MeshtasticProtobufs", .product(name: "SwiftProtobuf", package: "swift-protobuf")],
                 resources: [.copy("Resources/Stubs")]),
-        .executableTarget(name: "MeshKit", dependencies: ["MeshKitCore", "MeshtasticProtobufs"]),
+        .executableTarget(name: "MeshKit", dependencies: ["MeshKitCore", "MeshtasticProtobufs", .product(name: "Sparkle", package: "Sparkle")]),
         .executableTarget(name: "ESPSim", dependencies: ["MeshKitCore"]),
         .testTarget(name: "MeshKitCoreTests", dependencies: ["MeshKitCore"]),
     ],

@@ -72,6 +72,7 @@ struct MeshKitApp: App {
         // Running via `swift run` (no app bundle) needs this to get a menu bar and focus.
         NSApplication.shared.setActivationPolicy(.regular)
         Self.discardSavedWindowState()
+        _ = Updater.shared
         UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true, "NSQuitAlwaysKeepsWindows": false])
         let workspace = Workspace()
         _workspace = State(initialValue: workspace)
@@ -192,6 +193,10 @@ struct MeshKitCommands: Commands {
     }
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { Updater.shared.checkForUpdates() }
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("Flash Image from File…") { focused?.chooseImageToFlash() }
                 .keyboardShortcut("o")
@@ -417,6 +422,7 @@ struct SettingsView: View {
     let workspace: Workspace
     @AppStorage("espBaud") private var baud = 460_800
     @AppStorage("espBackupFirst") private var backupFirst = true
+    @State private var checksForUpdates = Updater.shared.automaticallyChecks
 
     var body: some View {
         @Bindable var fw = workspace.meshtastic.firmware
@@ -445,6 +451,15 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .tabItem { Label("Backups", systemImage: "externaldrive.badge.timemachine") }
+
+            Form {
+                Toggle("Check for updates automatically", isOn: $checksForUpdates)
+                    .onChange(of: checksForUpdates) { _, on in Updater.shared.automaticallyChecks = on }
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development")
+                Button("Check Now") { Updater.shared.checkForUpdates() }
+            }
+            .formStyle(.grouped)
+            .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
         }
         .scenePadding()
         .frame(width: 480, height: 230)

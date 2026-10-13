@@ -43,6 +43,15 @@ CHECK=$(mktemp -d); unzip -q "$DIST/$NAME.zip" -d "$CHECK"
 codesign --verify --deep --strict "$CHECK/MeshKit.app" && echo "  signature verifies after a plain unzip"
 rm -rf "$CHECK"
 
+# Sparkle's feed: signed with the key in the login keychain (created once with Sparkle's generate_keys --account
+# rip.bitstick.MeshKit). The app reads it from the latest release, so the file is uploaded with every release.
+SPARKLE_BIN=$(swift build -c release --show-bin-path 2>/dev/null | sed 's#/\.build/.*#/.build#')/artifacts/sparkle/Sparkle/bin
+APPCAST=$(mktemp -d); cp "$DIST/$NAME.zip" "$APPCAST/"
+"$SPARKLE_BIN/generate_appcast" --account rip.bitstick.MeshKit \
+  --download-url-prefix "https://github.com/thebitstick/MeshKit/releases/download/v$VERSION/" \
+  --link "https://github.com/thebitstick/MeshKit" "$APPCAST" >&2
+cp "$APPCAST/appcast.xml" "$DIST/appcast.xml"; rm -rf "$APPCAST"
+
 ( cd "$DIST" && shasum -a 256 "$NAME.zip" "$NAME.dmg" > SHA256SUMS.txt )
 echo "Packaged:"; ls -lh "$DIST" | sed 's/^/  /'
 lipo -archs "$APP/Contents/MacOS/MeshKit" 2>/dev/null | sed 's/^/  architectures: /'

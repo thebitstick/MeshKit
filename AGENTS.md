@@ -95,6 +95,7 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   with a confident match get the menu items, because the wrong bootloader can brick a board.
 - **Meshtastic admin writes** go to our own node, reliable, with `from == 0`; the session key is only enforced for
   packets with `from != 0`; a managed node ignores local admin, and the app says so.
+- **Auto-updates use Sparkle.** The feed is `releases/latest/download/appcast.xml`, so every release must upload `build/release/appcast.xml` (written by `Scripts/package.sh`, signed with the EdDSA key in the login keychain, account `rip.bitstick.MeshKit`; the public half is `SUPublicEDKey` in `Info.plist`). Sparkle compares `CFBundleVersion`, which must be bumped with `CFBundleShortVersionString` (both are the release version). Losing the private key means installed copies can't update, so back it up with `generate_keys -x`.
 - **Release data is untrusted.** Tag and asset names go through `ReleaseClient.safeComponent` before touching a
   path; URLs built from tags never force-unwrap. Radio presets from the network are validated (`isValid`) because
   they end up written to radios.
