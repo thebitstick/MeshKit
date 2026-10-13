@@ -44,7 +44,7 @@ struct DevicesView: View {
                     }
                 }
 
-                Card("UF2 bootloader volumes", symbol: "externaldrive", footnote: "The DFU button next to an nRF52 board's serial port restarts a Meshtastic node into this drive; otherwise double-tap reset.") {
+                Card("UF2 bootloader volumes", symbol: "externaldrive", footnote: "The DFU button next to an nRF52 board's serial port restarts a Meshtastic node into this drive. Other firmware restarts into serial DFU, which has no drive and takes Install over USB serial; double-tap reset for the drive.") {
                     if model.uf2Volumes.isEmpty { EmptyRow(text: "No UF2 bootloader drives mounted.") }
                     ForEach(model.uf2Volumes) { v in
                         HStack {

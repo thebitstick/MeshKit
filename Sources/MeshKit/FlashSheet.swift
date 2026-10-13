@@ -88,11 +88,11 @@ struct FlashSheet: View {
 
     private static let defaultESPWarning = "This rewrites the board's flash. A backup of the current flash is saved first unless you turn that off."
 
-    private var confirmTitle: String { "Install \(request.title.replacingOccurrences(of: "Install ", with: "")) on \((isUF2 ? volume?.name : port?.displayName) ?? "the board")?" }
+    private var confirmTitle: String { "\(request.title.hasPrefix("Restore") ? "Restore" : "Install") \(request.title.replacingOccurrences(of: "Install ", with: "").replacingOccurrences(of: "Restore ", with: "")) on \((isUF2 ? volume?.name : port?.displayName) ?? "the board")?" }
 
     @ViewBuilder private var targetPicker: some View {
         if isUF2 {
-            Picker("Bootloader drive", selection: $volumeID) {
+            Picker("Bootloader drive", selection: Binding(get: { volume?.id }, set: { volumeID = $0 })) {
                 if model.uf2Volumes.isEmpty { Text("None found").tag(String?.none) }
                 ForEach(model.uf2Volumes) { Text("\($0.name) — \($0.model)").tag(Optional($0.id)) }
             }
@@ -100,7 +100,10 @@ struct FlashSheet: View {
                 Text("Double-tap the reset button so the board's drive mounts. This list updates automatically.")
                     .font(.callout).foregroundStyle(.secondary)
                 if !model.dfuCandidatePorts.isEmpty {
-                    Button("Enter DFU mode") { Task { await model.enterDFUModeOnLikelyPort() } }
+                    Button("Enter DFU mode") { Task { await model.enterDFUModeOnLikelyPort(wantsDrive: true) } }
+                    if let notice = model.notice {
+                        Text(notice.text).font(.callout).foregroundStyle(notice.isError ? .red : .secondary)
+                    }
                 }
             } else {
                 if let volume, let note = request.volumeNote?(volume) {
@@ -111,7 +114,7 @@ struct FlashSheet: View {
                 }
             }
         } else {
-            Picker("Serial port", selection: $portID) {
+            Picker("Serial port", selection: Binding(get: { port?.id }, set: { portID = $0 })) {
                 if model.ports.isEmpty { Text("None found").tag(String?.none) }
                 ForEach(model.ports) { Text("\($0.displayName) — \($0.hint)").tag(Optional($0.id)) }
             }

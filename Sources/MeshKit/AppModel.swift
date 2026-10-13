@@ -339,25 +339,28 @@ final class AppModel {
     var dfuCandidatePorts: [SerialPortInfo] { ports.filter { $0.path.contains("usbmodem") } }
 
     /// Puts an nRF52 board into DFU mode whatever firmware it runs, and says what happened.
-    func enterDFUMode(port: SerialPortInfo) async {
+    func enterDFUMode(port: SerialPortInfo, wantsDrive: Bool = false) async {
         if session?.portName == port.displayName { disconnect(); try? await Task.sleep(for: .milliseconds(300)) }
         await perform("Entering DFU mode") {
             let log = logger
             switch try await NRF52DFUMode.enter(path: port.path, logger: { log("dfu: \($0)") }) {
             case .uf2Drive: return "The node is restarting into its UF2 bootloader. Its drive appears in a few seconds."
-            case .serialDFU: return "The board is in serial DFU mode. It has no drive: use Install over USB serial (the ⋯ menu next to the board name) to send firmware."
+            case .serialDFU:
+                return wantsDrive
+                    ? "This firmware restarts into serial DFU, which has no drive. Double-tap the board's reset button to get the drive instead."
+                    : "The board is in serial DFU mode. It has no drive: use Install over USB serial (the ⋯ menu next to the board name) to send firmware."
             }
         }
     }
 
     /// Menu and sheet shortcut: the connected node's port, or the only candidate.
-    func enterDFUModeOnLikelyPort() async {
-        if let s = session, let port = ports.first(where: { $0.displayName == s.portName }) { await enterDFUMode(port: port); return }
+    func enterDFUModeOnLikelyPort(wantsDrive: Bool = false) async {
+        if let s = session, let port = ports.first(where: { $0.displayName == s.portName }) { await enterDFUMode(port: port, wantsDrive: wantsDrive); return }
         guard let only = dfuCandidatePorts.first, dfuCandidatePorts.count == 1 else {
             show(Notice(text: dfuCandidatePorts.isEmpty ? "No nRF52 serial port found." : "More than one USB serial port: use the DFU button next to the right one in the device list.", isError: true))
             return
         }
-        await enterDFUMode(port: only)
+        await enterDFUMode(port: only, wantsDrive: wantsDrive)
     }
 
     func rebootDevice() async {
