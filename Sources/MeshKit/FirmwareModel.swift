@@ -19,6 +19,8 @@ final class FirmwareModel {
     var selectedBoardID: String?
     var preferredConnection: MeshCoreConnection = .ble
     var mcMode: MeshCoreInstallMode = .update
+    var sources: [FirmwareSource] = FirmwareSourceStore.load()
+    var sourceID: String?
 
     var channel: MeshtasticChannel = .stable
     var mtReleases: [MeshtasticRelease] = []
@@ -34,7 +36,7 @@ final class FirmwareModel {
 
     init(vendor: FirmwareVendor) { self.vendor = vendor }
 
-    private let client = ReleaseClient()
+    private var client: ReleaseClient { source.map { ReleaseClient(repository: $0.repository) } ?? ReleaseClient() }
     private let catalog = MeshtasticCatalog()
     private var mtAllReleases: [MeshtasticRelease] = []
 
@@ -49,11 +51,20 @@ final class FirmwareModel {
 
     // MARK: MeshCore
 
+    var source: FirmwareSource? { sources.first { $0.id == sourceID } }
+
+    func reloadSources() {
+        sources = FirmwareSourceStore.load()
+        guard sourceID != nil, source == nil else { return }
+        sourceID = nil; selectedTag = nil; selectedBoardID = nil
+        Task { await load() }
+    }
+
     var selectedRelease: GitHubRelease? { releases.first { $0.tagName == selectedTag } ?? releases.first }
 
     var boardGroups: [FirmwareBoardGroup] {
         guard let release = selectedRelease else { return [] }
-        let groups = FirmwareBoardGroup.groups(from: ReleaseClient.builds(from: release, role: role))
+        let groups = FirmwareBoardGroup.groups(from: ReleaseClient.builds(from: release, role: role, source: source?.id))
         guard !query.isEmpty else { return groups }
         return groups.compactMap { g in FuzzyMatch.score(query, in: [g.title, g.board, g.maker ?? ""]).map { (g, $0) } }
             .sorted { $0.1 > $1.1 }
@@ -97,13 +108,13 @@ final class FirmwareModel {
         switch vendor {
         case .meshcore:
             let role = role
-            let key = role.rawValue
+            let key = "\(sourceID ?? "")/\(role.rawValue)"
             do {
                 let fetched: [GitHubRelease]
                 if let cached = releaseCache[key], Date().timeIntervalSince(cached.fetched) < Self.cacheLifetime {
                     fetched = cached.releases
                 } else {
-                    fetched = try await client.releases(for: role)
+                    fetched = try await client.releases(for: role, limit: source == nil ? 4 : 8)
                     releaseCache[key] = (Date(), fetched)
                 }
                 guard generation == loadGeneration else { return }
@@ -186,7 +197,7 @@ final class FirmwareModel {
     func meshCoreRequest(model: AppModel) -> FlashRequest? {
         guard let group = selectedGroup, let release = selectedRelease else { return nil }
         return .meshCore(group, connection: group.build(for: effectiveConnection(for: group))?.connection,
-                         release: release, mode: mcMode, model: model)
+                         release: release, mode: mcMode, source: source, model: model)
     }
 
     func meshtasticFileName(board: MeshtasticBoard, release: MeshtasticRelease) -> String {

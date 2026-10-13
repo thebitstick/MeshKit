@@ -36,14 +36,14 @@ struct FlashRequest: Identifiable {
 
     @MainActor
     static func meshCore(_ group: FirmwareBoardGroup, connection: MeshCoreConnection?,
-                         release: GitHubRelease, mode: MeshCoreInstallMode, model: AppModel) -> FlashRequest? {
+                         release: GitHubRelease, mode: MeshCoreInstallMode, source: FirmwareSource? = nil, model: AppModel) -> FlashRequest? {
         guard let build = group.build(for: connection), let artifact = build.fullImage else { return nil }
         let role = build.role.title
         let via = connection.map { " · \($0.title)" } ?? ""
         let isUF2 = artifact.kind == .uf2
         var request = FlashRequest(
             title: "Install \(group.title)",
-            subtitle: "MeshCore \(role)\(via) · v\(build.version) · \(mode.rawValue)",
+            subtitle: "\(source?.name ?? "MeshCore") \(role)\(via) · v\(build.version) · \(mode.rawValue)",
             target: isUF2 ? .uf2 : .esp,
             details: [artifact.asset.name],
             prepare: { _ in
@@ -64,6 +64,9 @@ struct FlashRequest: Identifiable {
             request.warning = mode == .fresh
                 ? "A clean install erases the whole flash, including the node's identity key and settings. A backup of the current flash is saved first unless you turn that off."
                 : "\(kept) A backup of the current flash is saved first unless you turn that off."
+        }
+        if let source {
+            request.warning = "This build comes from \(source.repository), not from the MeshCore project. MeshKit can't vouch for it. " + (request.warning ?? "")
         }
         return request
     }

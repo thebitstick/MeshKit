@@ -135,15 +135,22 @@ public struct FirmwareArtifact: Identifiable, Hashable, Sendable {
     public var isESP32: Bool { kind == .espFullImage || kind == .espAppImage }
     public var isFlashableFullImage: Bool { kind == .espFullImage || kind == .uf2 }
 
-    public static func parse(asset: GitHubAsset, role: MeshCoreRole, releaseTag: String) -> FirmwareArtifact? {
-        let pattern = #/^(.+)-v(\d+(?:\.\d+)*)-([0-9a-f]{6,})(-merged)?\.(bin|uf2|zip)$/#
+    public static func parse(asset: GitHubAsset, role: MeshCoreRole, releaseTag: String, requireRole: Bool = false) -> FirmwareArtifact? {
+        let pattern = #/^(.+)-v(\d+(?:\.\d+)*(?:-[A-Za-z]+)*)-([0-9a-f]{6,})(-merged)?\.(bin|uf2|zip)$/#
         guard let m = asset.name.wholeMatch(of: pattern) else { return nil }
-        let prefix = String(m.1)
+        var prefix = String(m.1)
+        var version = String(m.2)
+        // Some forks name the file for their own version and the MeshCore version they are based on:
+        // `<board>_<role>_<conn>_<fork>_mm-v1.6.1_mc-v1.17.1-<hash>`. Their own version is the one that matters here.
+        if let fork = prefix.wholeMatch(of: #/(.+)_[a-z]+-v(\d+(?:\.\d+)*)_[a-z]+/#) {
+            prefix = String(fork.1); version = String(fork.2)
+        }
         let board: String, variant: String
         if let r = prefix.range(of: role.assetMarker, options: .backwards) {
             board = String(prefix[..<r.lowerBound])
             variant = String(prefix[r.lowerBound...].dropFirst())
         } else {
+            if requireRole { return nil }
             board = prefix; variant = ""
         }
         let kind: Kind = switch (String(m.5), m.4 != nil) {
@@ -154,7 +161,7 @@ public struct FirmwareArtifact: Identifiable, Hashable, Sendable {
         default: .other
         }
         return FirmwareArtifact(asset: asset, role: role, releaseTag: releaseTag, board: board, variant: variant,
-                                version: String(m.2), commit: String(m.3), kind: kind)
+                                version: version, commit: String(m.3), kind: kind)
     }
 }
 
@@ -211,6 +218,8 @@ public enum MeshCoreConnection: String, CaseIterable, Identifiable, Sendable {
 
     public static func parse(variant: String) -> MeshCoreConnection? {
         guard variant.hasPrefix("companion_radio_") else { return nil }
+        let rest = variant.dropFirst("companion_radio_".count)
+        if let first = rest.split(separator: "_").first, let c = allCases.first(where: { $0.rawValue == first }) { return c }
         return allCases.first { variant.hasSuffix("_" + $0.rawValue) }
     }
 }
@@ -259,9 +268,14 @@ public enum ReleaseError: Error, LocalizedError {
 }
 
 public struct ReleaseClient: Sendable {
-    public var repository = "meshcore-dev/MeshCore"
+    public static let officialRepository = "meshcore-dev/MeshCore"
+
+    public var repository = ReleaseClient.officialRepository
+    public var isOfficial: Bool { repository == Self.officialRepository }
 
     public init() {}
+
+    public init(repository: String) { self.repository = repository }
 
     func request(_ url: URL) -> URLRequest {
         var r = URLRequest(url: url)
@@ -282,11 +296,15 @@ public struct ReleaseClient: Sendable {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601
         let all = try decoder.decode([GitHubRelease].self, from: data)
-        return Array(all.filter { $0.tagName.hasPrefix(role.tagPrefix) }.prefix(limit))
+        if isOfficial { return Array(all.filter { $0.tagName.hasPrefix(role.tagPrefix) }.prefix(limit)) }
+        // Other projects don't split roles across tags, so a release counts if any of its files is a build for this role.
+        return Array(all.filter { !Self.builds(from: $0, role: role).isEmpty }.prefix(limit))
     }
 
-    public static func builds(from release: GitHubRelease, role: MeshCoreRole) -> [FirmwareBuild] {
-        let artifacts = release.assets.compactMap { FirmwareArtifact.parse(asset: $0, role: role, releaseTag: release.tagName) }
+    /// `source` keeps same-named tags from different projects apart in the download cache.
+    public static func builds(from release: GitHubRelease, role: MeshCoreRole, source: String? = nil) -> [FirmwareBuild] {
+        let tag = source.map { "\($0)-\(release.tagName)" } ?? release.tagName
+        let artifacts = release.assets.compactMap { FirmwareArtifact.parse(asset: $0, role: role, releaseTag: tag, requireRole: source != nil) }
         let grouped = Dictionary(grouping: artifacts) { "\($0.board)|\($0.variant)" }
         return grouped.values.map { group in
             let sorted = group.sorted { $0.kind.rawValue < $1.kind.rawValue }

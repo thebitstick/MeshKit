@@ -423,6 +423,9 @@ struct SettingsView: View {
     @AppStorage("espBaud") private var baud = 460_800
     @AppStorage("espBackupFirst") private var backupFirst = true
     @State private var checksForUpdates = Updater.shared.automaticallyChecks
+    @State private var sources = FirmwareSourceStore.load()
+    @State private var newRepository = ""
+    @State private var newName = ""
 
     var body: some View {
         @Bindable var fw = workspace.meshtastic.firmware
@@ -441,6 +444,25 @@ struct SettingsView: View {
             Form {
                 Toggle("Show community and unofficial Meshtastic boards", isOn: $fw.showCommunityBoards)
                 Button("Clear Downloaded Firmware") { try? FileManager.default.removeItem(at: ReleaseClient.cacheDirectory) }
+
+                Section("Other MeshCore firmware sources") {
+                    ForEach(sources) { source in
+                        LabeledContent(source.name) {
+                            HStack {
+                                Text(source.repository).foregroundStyle(.secondary)
+                                Button { remove(source) } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                    HStack {
+                        TextField("GitHub project", text: $newRepository, prompt: Text("owner/repo"))
+                        TextField("Name", text: $newName, prompt: Text("Optional"))
+                        Button("Add") { add() }
+                            .disabled(FirmwareSource.normalize(newRepository) == nil)
+                    }
+                    Text("Builds from other projects appear beside the official ones in the MeshCore window. MeshKit can't vouch for them.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
             .tabItem { Label("Firmware", systemImage: "square.and.arrow.down.on.square") }
@@ -462,7 +484,19 @@ struct SettingsView: View {
             .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
         }
         .scenePadding()
-        .frame(width: 480, height: 230)
+        .frame(width: 540, height: 360)
+    }
+
+    private func add() {
+        guard let source = FirmwareSource(repository: newRepository, name: newName), !sources.contains(where: { $0.id == source.id }) else { return }
+        sources.append(source)
+        FirmwareSourceStore.save(sources)
+        newRepository = ""; newName = ""
+    }
+
+    private func remove(_ source: FirmwareSource) {
+        sources.removeAll { $0 == source }
+        FirmwareSourceStore.save(sources)
     }
 }
 

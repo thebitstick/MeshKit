@@ -53,6 +53,11 @@ struct FirmwareView: View {
             fw.selectedBoardID = nil
             Task { await fw.load() }
         }
+        .onChange(of: fw.sourceID) { _, _ in
+            fw.selectedTag = nil; fw.selectedBoardID = nil
+            Task { await fw.load() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in fw.reloadSources() }
         .onChange(of: fw.channel) { _, _ in
             guard fw.vendor == .meshtastic else { return }
             fw.mtSelectedVersion = nil; fw.mtSelectedSlug = nil
@@ -78,9 +83,17 @@ private struct MeshCoreControls: View {
         }
         .pickerStyle(.segmented).labelsHidden()
         HStack {
+            if !fw.sources.isEmpty {
+                Picker("Source", selection: $fw.sourceID) {
+                    Text("MeshCore").tag(String?.none)
+                    Divider()
+                    ForEach(fw.sources) { Text($0.name).tag(Optional($0.id)) }
+                }
+                .labelsHidden().fixedSize()
+            }
             Picker("Version", selection: $fw.selectedTag) {
                 ForEach(fw.releases, id: \.tagName) { r in
-                    Text(r.tagName.components(separatedBy: "-v").last.map { "v\($0)" } ?? r.tagName).tag(Optional(r.tagName))
+                    Text(fw.source == nil ? (r.tagName.components(separatedBy: "-v").last.map { "v\($0)" } ?? r.tagName) : r.tagName).tag(Optional(r.tagName))
                 }
             }
             .labelsHidden().frame(maxWidth: 220)
@@ -277,11 +290,18 @@ private struct MeshCoreBoardDetail: View {
 
     private func subtitle(_ build: FirmwareBuild?) -> String {
         guard let build else { return "" }
-        return "MeshCore \(model.firmware.role.title) · v\(build.version)"
+        return "\(model.firmware.source?.name ?? "MeshCore") \(model.firmware.role.title) · v\(build.version)"
     }
 
     private func installFootnote(_ build: FirmwareBuild?) -> String {
         guard let build else { return "" }
+        if let source = model.firmware.source {
+            return "Community build from \(source.repository), not from the MeshCore project. " + hardwareNote(build)
+        }
+        return hardwareNote(build)
+    }
+
+    private func hardwareNote(_ build: FirmwareBuild) -> String {
         if build.isUF2 { return "Put the board in bootloader mode (double-tap reset) so its UF2 drive appears, then install. A clean install first runs Meshtastic's erase tool, so it needs a Meshtastic release to download it from." }
         if build.isESP32 {
             return "Only the full image is downloaded. An update writes just its boot-selection data and application; a clean install writes all of it at 0x0 after erasing the chip."

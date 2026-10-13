@@ -60,6 +60,27 @@ import Testing
         #expect(wio.isUF2)
     }
 
+    @Test func observerReleasesAreUnderstood() async throws {
+        guard enabled else { return }
+        let client = ReleaseClient(repository: "agessaman/MeshCore")
+        let releases = try await client.releases(for: .repeater, limit: 8)
+        let release = try #require(releases.first { $0.assets.count > 20 })
+        let builds = ReleaseClient.builds(from: release, role: .repeater, source: client.repository)
+        #expect(builds.count > 10)
+        #expect(builds.allSatisfy { $0.fullImage != nil || $0.artifacts.contains { $0.kind == .espAppImage } })
+        let v3 = try #require(FirmwareBoardGroup.groups(from: builds).first { $0.board.lowercased().hasPrefix("heltec_v") })
+        #expect(v3.isESP32)
+    }
+
+    @Test func mishmeshReleasesOfferUSBAndBluetooth() async throws {
+        guard enabled else { return }
+        let client = ReleaseClient(repository: "burakcan/MeshCore-mishmesh")
+        let release = try #require(try await client.releases(for: .companion, limit: 1).first)
+        let groups = FirmwareBoardGroup.groups(from: ReleaseClient.builds(from: release, role: .companion, source: client.repository))
+        let wio = try #require(groups.first { $0.board == "WioTrackerL1" })
+        #expect(Set(wio.connections) == [.usb, .ble])
+    }
+
     @Test(arguments: MeshCoreRole.allCases)
     func meshCoreUpdateKeepsTheApplicationIdenticalToTheAppOnlyFile(role: MeshCoreRole) async throws {
         guard enabled else { return }
