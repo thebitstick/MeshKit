@@ -257,11 +257,16 @@ private struct MeshCoreBoardDetail: View {
                 }
 
                 Card("Install", symbol: "bolt.fill", footnote: installFootnote(build)) {
-                    Button { if let r = fw.meshCoreRequest(model: model) { model.pendingFlash = r } } label: {
-                        Label("Install \(fw.role.title)\(connection.map { " · \($0.title)" } ?? "")…", systemImage: "square.and.arrow.down")
+                    HStack {
+                        Button { if let r = fw.meshCoreRequest(model: model) { model.pendingFlash = r } } label: {
+                            Label("Install \(fw.role.title)\(connection.map { " · \($0.title)" } ?? "")…", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .fixedSize()
+                        .disabled(build?.fullImage == nil)
+                        if let file = build?.fullImage?.asset.name { FileNameLabel(name: file) }
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(build?.fullImage == nil)
                 }
             }
             .padding(24)
@@ -300,6 +305,7 @@ private struct MeshtasticBoardDetail: View {
                         Pill(text: release.channel.rawValue)
                         Pill(text: board.architectureLabel)
                         if board.supportLevel.map({ $0 > 1 }) ?? false { Pill(text: "Community") }
+                        Link("Release notes", destination: release.pageURL).font(.callout)
                     }
                 }
 
@@ -316,8 +322,9 @@ private struct MeshtasticBoardDetail: View {
                             Label("Install Meshtastic…", systemImage: "square.and.arrow.down")
                         }
                         .buttonStyle(.borderedProminent)
-                        Link("Release notes", destination: release.pageURL)
-                        Spacer()
+                        .fixedSize()
+                        FileNameLabel(name: fw.meshtasticFileName(board: board, release: release))
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -354,5 +361,13 @@ struct FirmwareFilesMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Download the firmware files")
+    }
+}
+
+struct FileNameLabel: View {
+    let name: String
+    var body: some View {
+        Text(name).font(.caption.monospaced()).foregroundStyle(.secondary)
+            .lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(name)
     }
 }

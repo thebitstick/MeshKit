@@ -53,12 +53,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MeshKitApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     // Created once in `init`. (A default value here would build a second set of models, and so of startup work.)
+    /// macOS keeps the set of open windows between launches and reopens them, which skips the Welcome window. There is
+    /// nothing worth restoring, so anything left behind is removed before AppKit looks for it.
+    private static func discardSavedWindowState() {
+        let bundleID = Bundle.main.bundleIdentifier ?? "rip.bitstick.MeshKit"
+        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        for base in [URL(fileURLWithPath: NSTemporaryDirectory()), library.appendingPathComponent("Saved Application State")] {
+            try? FileManager.default.removeItem(at: base.appendingPathComponent("\(bundleID).savedState"))
+        }
+    }
+
+    static let deviceWindowSize = CGSize(width: 900, height: 620)
+
     @State private var workspace: Workspace
     @State private var bridge: ModelBridge
 
     init() {
         // Running via `swift run` (no app bundle) needs this to get a menu bar and focus.
         NSApplication.shared.setActivationPolicy(.regular)
+        Self.discardSavedWindowState()
+        UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true, "NSQuitAlwaysKeepsWindows": false])
         let workspace = Workspace()
         _workspace = State(initialValue: workspace)
         _bridge = State(initialValue: ModelBridge(workspace: workspace))
@@ -78,16 +92,18 @@ struct MeshKitApp: App {
             RootView()
                 .environment(workspace.meshcore)
                 .frame(minWidth: 760, minHeight: 520)
+                .background(WindowPlacer(size: Self.deviceWindowSize))
         }
-        .defaultSize(width: 900, height: 620)
+        .defaultSize(width: Self.deviceWindowSize.width, height: Self.deviceWindowSize.height)
         .windowToolbarStyle(.unified(showsTitle: false))
 
         Window("Meshtastic", id: FirmwareVendor.meshtastic.windowID) {
             RootView()
                 .environment(workspace.meshtastic)
                 .frame(minWidth: 760, minHeight: 520)
+                .background(WindowPlacer(size: Self.deviceWindowSize))
         }
-        .defaultSize(width: 900, height: 620)
+        .defaultSize(width: Self.deviceWindowSize.width, height: Self.deviceWindowSize.height)
         .windowToolbarStyle(.unified(showsTitle: false))
 
         Settings {
@@ -350,12 +366,17 @@ struct WelcomeView: View {
     }
 }
 
-/// Centres the window on its screen, a little above the middle where the eye expects it.
-private struct WindowPlacer: NSViewRepresentable {
+/// Opens the window at a fixed size, centred on its screen a little above the middle where the eye expects it, and
+/// stops macOS from restoring whatever frame it had last time.
+struct WindowPlacer: NSViewRepresentable {
+    var size: CGSize?
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             guard let window = view.window, let screen = window.screen ?? NSScreen.main else { return }
+            window.isRestorable = false
+            if let size { window.setContentSize(size) }
             let area = screen.visibleFrame
             window.setFrameOrigin(NSPoint(x: area.midX - window.frame.width / 2,
                                           y: area.midY - window.frame.height / 2 + area.height * 0.08))

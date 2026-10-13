@@ -55,8 +55,10 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
 
 - **One `AppModel` per device window**, each tied to a vendor (`FirmwareVendor`). The window only probes its own
   firmware, so a Meshtastic node in the MeshCore window is a clear error rather than a guess. Closing a window
-  disconnects so the port is free. Windows: Welcome (always the launch window; state restoration is off on purpose),
-  MeshCore, Meshtastic.
+  disconnects so the port is free. Windows: Welcome (always the launch window), MeshCore, Meshtastic. State
+  restoration is off on purpose: `ApplePersistenceIgnoreState` is registered, windows are `isRestorable = false`, and
+  device windows are resized and re-centred on every open (`WindowPlacer`). Without this macOS reopens the last window
+  and skips Welcome.
 - **Native flasher, no esptool.** Packets are SLIP-framed; the command checksum seed is 0xEF; after the stub is
   running it talks the stub dialect. Pre-flight checks refuse an image for the wrong chip or larger than the flash
   before anything is erased. A flash backup is taken first unless the user turns it off.

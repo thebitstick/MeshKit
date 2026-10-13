@@ -189,6 +189,12 @@ final class FirmwareModel {
                          release: release, mode: mcMode, model: model)
     }
 
+    func meshtasticFileName(board: MeshtasticBoard, release: MeshtasticRelease) -> String {
+        let base = "firmware-\(board.slug)-\(release.version)"
+        if board.isNRF52 { return base + ".uf2" }
+        return base + (mtMode == .fresh ? ".factory.bin" : ".bin")
+    }
+
     func meshtasticRequest() -> FlashRequest? {
         guard let board = mtSelectedBoard, let release = mtSelectedRelease else { return nil }
         return .meshtastic(board, release: release, mode: mtMode)
