@@ -90,6 +90,9 @@ struct FlashSheet: View {
             if model.uf2Volumes.isEmpty {
                 Text("Double-tap the reset button so the board's drive mounts. This list updates automatically.")
                     .font(.callout).foregroundStyle(.secondary)
+                if model.canEnterBootloader {
+                    Button("Restart the connected node into its bootloader") { Task { await model.restartIntoBootloader() } }
+                }
             } else if let volume, let note = request.volumeNote?(volume) {
                 Text(note).font(.callout).foregroundStyle(.secondary)
             }

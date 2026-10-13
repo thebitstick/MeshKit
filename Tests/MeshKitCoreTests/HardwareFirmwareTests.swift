@@ -229,27 +229,6 @@ import Testing
         await cli.stop()
     }
 
-    /// The standard "1200 baud touch": opening the port at 1200 baud and closing it reboots an Adafruit nRF52 board into its bootloader.
-    @Test func touchIntoBootloader() async throws {
-        guard let path = HardwareTests.port, HardwareTests.step == "touch" else { return }
-        try await Task.sleep(for: .milliseconds(300))
-        let port = try SerialPort(path: path, baud: 1200)
-        try await Task.sleep(for: .milliseconds(500))
-        port.close()
-        for _ in 0..<40 {
-            if let v = UF2Volumes.detect().first {
-                print("VOLUME", v.name, "model:", v.model, "board:", v.boardID, "softdevice:", v.softDevice.debugDescription)
-                print("INFO", (try? String(contentsOf: v.url.appendingPathComponent("INFO_UF2.TXT"), encoding: .utf8)) ?? "?")
-                let current = try UF2Flasher.readCurrentImage(from: v)
-                try current.write(to: HardwareTests.out.appendingPathComponent("wio-current.uf2"))
-                print("CURRENT.UF2", current.count)
-                return
-            }
-            try await Task.sleep(for: .milliseconds(500))
-        }
-        print("NO BOOTLOADER VOLUME")
-    }
-
     @Test func nrfBackup() async throws {
         guard HardwareTests.step == "nrf-backup" else { return }
         let v = try #require(UF2Volumes.detect().first)
@@ -402,5 +381,26 @@ import Testing
         print("RESTORING", original.count)
         let outcome = try await UF2Flasher.flash(image: original, to: v) { _ in }
         print("OUTCOME", outcome)
+    }
+
+    @Test func nrfAdminDFU() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-admin-dfu" else { return }
+        try await Self.waitForVolume()
+        let catalog = MeshtasticCatalog()
+        let release = try #require(try await catalog.releases(limit: 30).first { $0.channel == .stable })
+        let board = try #require(try await catalog.boards(in: release).first { $0.slug == "seeed_wio_tracker_L1" })
+        try await Self.nrfFlash(try await catalog.package(for: board, in: release).uf2Image())
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(8))
+        let (client, state) = try await Self.meshtastic(path)
+        print("MT UP", state.nodeID, state.metadata?.firmwareVersion ?? "?")
+        try await client.enterDFUMode()
+        await client.stop()
+        HardwareTests.closePorts()
+        for _ in 0..<40 {
+            if let v = UF2Volumes.detect().first { print("ADMIN DFU WORKS ->", v.name, v.bootloader.prefix(40)); return }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        print("ADMIN DFU DID NOT PRODUCE A DRIVE; ports", SerialDiscovery.list().map(\.path))
     }
 }

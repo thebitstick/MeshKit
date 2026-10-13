@@ -146,6 +146,17 @@ import Testing
         await client.stop()
     }
 
+    @Test func aNodeCanBeToldToRestartIntoItsBootloader() async throws {
+        let (client, node) = try await connected()
+        try await client.enterDFUMode()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(node.dfuRequests == 1)
+        node.setManaged(true)
+        _ = try await client.connect(timeout: 5)
+        await #expect(throws: MeshtasticNodeError.managed) { try await client.enterDFUMode() }
+        await client.stop()
+    }
+
     @Test func notAMeshtasticNodeFailsCleanly() async throws {
         final class Chatty: ByteTransport, @unchecked Sendable {
             let b = DataBroadcaster()

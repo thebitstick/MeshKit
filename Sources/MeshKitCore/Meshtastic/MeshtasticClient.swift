@@ -328,6 +328,13 @@ public actor MeshtasticClient {
         try await awaitAck(try await sendAdmin(wantResponse: false) { $0.setTimeOnly = UInt32(Date().timeIntervalSince1970) })
     }
 
+    /// Reboots an nRF52 node into its UF2 bootloader. The node ignores the request on other chips.
+    public func enterDFUMode() async throws {
+        if state.device?.isManaged == true { throw MeshtasticNodeError.managed }
+        await fetchSessionKey()
+        try await sendAdmin(wantResponse: false) { $0.enterDfuModeRequest = true }
+    }
+
     public func reboot(seconds: Int32 = 5) async throws {
         if state.device?.isManaged == true { throw MeshtasticNodeError.managed }
         await fetchSessionKey()

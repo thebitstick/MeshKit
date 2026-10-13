@@ -31,7 +31,7 @@ menu. The ESP32 flasher is written in Swift, so there's no `esptool`, Python or 
 | **Radio presets** | Community presets by region, plus your own | Meshtastic's modem presets |
 | **Back up** | Settings snapshots and full ESP32 flash images | Same |
 
-On nRF52 boards the three-dot menu next to the board name can install the OTAFIX bootloader, which makes Bluetooth firmware updates more reliable. Any `.bin` or `.uf2` can be flashed from File ▸ Flash Image from File (⌘O) or by dropping it on the window. Demo devices
+A connected Meshtastic nRF52 node can be sent into its bootloader from Device ▸ Restart into Bootloader, so no reset button is needed. On nRF52 boards the three-dot menu next to the board name can install the OTAFIX bootloader, which makes Bluetooth firmware updates more reliable. Any `.bin` or `.uf2` can be flashed from File ▸ Flash Image from File (⌘O) or by dropping it on the window. Demo devices
 let you try everything without hardware.
 
 ## Install

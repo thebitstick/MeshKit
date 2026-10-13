@@ -95,8 +95,10 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   repeater CLI answers with a line prefixed `->` or `>` and has no end-of-reply marker; MeshKit waits for quiet.
   Four companion commands are marked `UNVERIFIED` in `CompanionProtocol.swift`; confirm them against firmware before
   claiming support.
-- nRF52 on a Wio Tracker L1 (checked on hardware): the 1200-baud touch does not enter the bootloader, so the user has to
-  double-tap reset; the `usbmodem` path stays the same in and out of the bootloader; `INFO_UF2.TXT` has `Model`,
+- nRF52 on a Wio Tracker L1 (checked on hardware): the 1200-baud touch with DTR dropped does not give the UF2 drive:
+  on Adafruit bootloaders it starts nrfutil *serial* DFU, leaving a silent USB serial port and no drive (a double-tap
+  recovers it), so MeshKit does not use it. A Meshtastic node does reboot into the UF2 drive when sent the admin message
+  `enter_dfu_mode_request` (Device ▸ Restart into Bootloader); MeshCore has no equivalent, so the user double-taps reset; the `usbmodem` path stays the same in and out of the bootloader; `INFO_UF2.TXT` has `Model`,
   `Board-ID`, `SoftDevice` and a first line like `UF2 Bootloader 0.9.2-OTAFIX2.2-BP1.3 …` (so the installed OTAFIX
   version is known); `CURRENT.UF2` holds SoftDevice and app (family `0x28861667`, which `UF2VolumeFlasher` refuses, but
   copying it back as `NEW.UF2` restores the board).

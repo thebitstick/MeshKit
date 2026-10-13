@@ -33,7 +33,7 @@ what did not.
 - GitHub Actions (`.github/workflows/check.yml`) builds, runs the tests and checks the app's code signature on a macOS runner; it passes.
 - MeshCore's update and clean-install plans were checked against the real v1.17.1 images (partition layout, and that the application inside each merged image matches the app-only file) and against the simulated flasher (an update leaves the filesystem alone; a clean install erases it). They were then run on a real Heltec V3 with the repeater, companion and room server firmware.
 - A real **Heltec V3** running MeshCore repeater, companion and room server (v1.17.1) and Meshtastic (stable and alpha): clean installs and updates, settings changes over USB, restoring a full flash backup, and connecting from the app. That testing found and fixed the repeater console parsing, slow `set` replies, clock-sync and slow-boot probe problems listed in the commit history.
-- A **Wio Tracker L1** (nRF52840): MeshCore companion and Meshtastic installs over UF2, clean install with the erase tool, and the OTAFIX bootloader update (OTAFIX 2.2 to 2.3, afterwards the board still booted). The board-to-bootloader mapping is otherwise unchecked.
+- A **Wio Tracker L1** (nRF52840): MeshCore companion and Meshtastic installs over UF2, clean install with the erase tool, the OTAFIX bootloader update (OTAFIX 2.2 to 2.3, afterwards the board still booted), and Meshtastic's "enter DFU mode" request, which brought up the UF2 drive. The board-to-bootloader mapping is otherwise unchecked.
 
 ## What was not tested
 

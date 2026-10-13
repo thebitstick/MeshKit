@@ -333,6 +333,19 @@ final class AppModel {
         }
     }
 
+    var canEnterBootloader: Bool { session?.kind == .meshtastic && session?.isDemo == false }
+
+    /// Asks a connected Meshtastic node to reboot into its UF2 bootloader (nRF52 boards), so its drive appears without
+    /// the reset button. MeshCore firmware has no equivalent request.
+    func restartIntoBootloader() async {
+        guard let session, session.kind == .meshtastic else { return }
+        await perform("Restarting into the bootloader") {
+            try await session.meshtastic?.enterDFUMode()
+            disconnect()
+            return "Asked the node to restart into its bootloader. nRF52 boards show a drive in a few seconds."
+        }
+    }
+
     func rebootDevice() async {
         guard let session else { return }
         await perform("Rebooting") {
