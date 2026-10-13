@@ -146,6 +146,11 @@ import Testing
     @Test func cleansEchoAndPrefix() {
         #expect(RepeaterCLIClient.clean("get name\r\n  -> Hilltop\r\n", command: "get name") == "Hilltop")
         #expect(RepeaterCLIClient.clean("ver\r\n> v1.17.1 (build)\r\n", command: "ver") == "v1.17.1 (build)")
+        // v1.17.1 on a Heltec V3: the prompt `->` and then `> ` before the value of a `get`.
+        #expect(RepeaterCLIClient.clean("get name\r\n  -> > MQTT Observer\r\n", command: "get name") == "MQTT Observer")
+        #expect(RepeaterCLIClient.clean("get radio\r\n  -> > 869.6179809,62.5,8,5\r\n", command: "get radio") == "869.6179809,62.5,8,5")
+        #expect(RepeaterCLIClient.clean("get owner.info\r\n  -> > \r\n", command: "get owner.info") == "")
+        #expect(RepeaterCLIClient.clean("get owner.info\r\n  -> >\r\n", command: "get owner.info") == "")
         #expect(RepeaterCLIClient.clean("neighbors\r\n  -> a:1:2\r\n  -> b:3:4", command: "neighbors") == "a:1:2\nb:3:4")
     }
 

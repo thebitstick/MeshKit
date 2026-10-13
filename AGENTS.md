@@ -39,6 +39,7 @@ Scripts/build-app.sh                          # build/MeshKit.app, release, host
 UNIVERSAL=1 Scripts/build-app.sh              # arm64 + x86_64
 Scripts/package.sh                            # universal build, then build/release/*.zip, *.dmg, SHA256SUMS.txt
 swift Scripts/make-icon.swift Resources       # redraws AppIcon.icns and icon-readme.png
+MESHKIT_HARDWARE_PORT=/dev/cu.usbserial-0001 MESHKIT_HARDWARE_STEP=read swift test --filter HardwareTests  # real Heltec V3 repeater; steps: read, write, update, clean, restore:<file>, catalog, set:<key>=<value>
 swift run esp-sim --port 5555 --chip esp32s3  # simulated ESP for esptool: esptool --port socket://127.0.0.1:5555 chip_id
 swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic --host 127.0.0.1 --info
 ```
@@ -97,6 +98,11 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
 - Meshtastic stream API: `0x94 0xC3`, big-endian 16-bit length, protobuf. Waking a node takes a run of `0xC3`.
 - MeshCore releases are per role, tagged `companion-vX`, `repeater-vX`, `room-server-vX`. Companion builds come in `usb`
   and `ble` variants; repeaters and room servers have one build per board.
+- Real v1.17.1 repeater console (Heltec V3, checked on hardware): `get x` answers `  -> > value`; `ver` and `board` answer
+  `  -> value`; a `set` is echoed at once and answered `OK` up to a second later (flash write), so an echo alone is not a
+  reply; the serial console sets the clock with `time <epoch>` (`clock sync` returns `ERR: clock cannot go backwards`);
+  `advert.interval` takes 0 (off) or 60-240; a freshly erased board takes several seconds to boot and prints
+  `Repeater ID: …` before the console answers.
 - Radio presets come from `api.meshcore.nz`, cached 24 hours, with a bundled snapshot as the offline fallback.
 
 ## Working agreements
@@ -106,7 +112,7 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
 - **Never touch the user's uncommitted work.** Do not `git stash`, `reset` or `checkout` to compare things.
 - **Be honest about verification.** Say what was tested and what was not. Only the Heltec V3 (Meshtastic including a
   clean install, MeshCore companion and repeater) has run on real hardware; say so rather than implying more.
-  Not tried on hardware: nRF52 UF2 installs, restoring a flash image, CH340 and native-USB ESP32 boards, the
+  Not tried on hardware: nRF52 UF2 installs, CH340 and native-USB ESP32 boards, the
   Developer ID signing and notarisation path.
 - **No comments unless the code is not self-explanatory.** Comment only a non-obvious *why* (a protocol quirk, a
   SwiftUI workaround), never what the code already says.

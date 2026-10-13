@@ -104,7 +104,9 @@ public final class SimulatedRepeaterTransport: ByteTransport, @unchecked Sendabl
         }
         for line in lines {
             try await Task.sleep(for: .milliseconds(30))
-            broadcaster.yield(Data((line + "\r\n" + reply(to: line)).utf8))
+            broadcaster.yield(Data((line + "\r\n").utf8))
+            if line.hasPrefix("set ") { try await Task.sleep(for: .milliseconds(600)) }
+            broadcaster.yield(Data(reply(to: line).utf8))
         }
     }
 
@@ -115,16 +117,18 @@ public final class SimulatedRepeaterTransport: ByteTransport, @unchecked Sendabl
         case "ver": return out("v1.17.1 (05 Oct 2026)")
         case "board": return out("Simulated Heltec V3")
         case "clock": return out("12:34 - 5/10/2026 UTC")
-        case "clock sync": return out("OK - clock set")
+        case "clock sync": return out("ERR: clock cannot go backwards")
         case "advert", "advert.zerohop": return out("OK - Advert sent")
         case "neighbors": return out("a1b2c3d4:1790000000:36\r\ne5f60718:1790000300:28")
         case "reboot": return ""
         default: break
         }
         switch parts.first {
+        case "time" where parts.count >= 2 && Int(parts[1]) != nil:
+            return out("OK - clock set: 12:34 - 5/10/2026 UTC")
         case "get" where parts.count >= 2:
             lock.lock(); defer { lock.unlock() }
-            return store[parts[1]].map(out) ?? out("Error: unknown config")
+            return store[parts[1]].map { out("> " + $0) } ?? out("Error: unknown config")
         case "set" where parts.count >= 3:
             lock.lock(); defer { lock.unlock() }
             guard store[parts[1]] != nil else { return out("Error: unknown config") }

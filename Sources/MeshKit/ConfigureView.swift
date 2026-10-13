@@ -382,7 +382,7 @@ struct RepeaterConfigView: View {
     private func validate(_ s: CLISetting, _ value: String) -> String? {
         switch s.kind {
         case .number(let range):
-            guard let d = Double(value), range.contains(d) else { return "must be a number from \(range.lowerBound) to \(range.upperBound)" }
+            guard let d = Double(value), range.contains(d) || (s.allowsZero && d == 0) else { return "must be a number from \(range.lowerBound) to \(range.upperBound)\(s.allowsZero ? ", or 0 to turn it off" : "")" }
         case .radio:
             let p = value.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
             guard p.count == 4, p.allSatisfy({ $0 != nil }) else { return "use freq,bw,sf,cr (e.g. 910.525,62.5,7,5)" }
@@ -494,7 +494,7 @@ struct ActionsPane: View {
         guard let cli = session.cli else { return }
         running = action.id; defer { running = nil }
         do {
-            let reply = try await cli.run(action.command, timeout: action.expectsReply ? .seconds(3) : .seconds(1))
+            let reply = try await cli.run(action.resolvedCommand, timeout: action.expectsReply ? .seconds(3) : .seconds(1))
             output = reply.isEmpty ? "\(action.title): sent" : reply
         } catch {
             output = error.localizedDescription

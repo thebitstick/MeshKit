@@ -17,6 +17,8 @@ public struct CLISetting: Identifiable, Sendable {
     public let kind: Kind
     public var requiresReboot = false
     public var sensitive = false
+    /// A number setting where 0 turns the feature off even though it lies outside the usual range.
+    public var allowsZero = false
 
     public var getCommand: String { "get \(id)" }
     public func setCommand(_ value: String) -> String { "set \(id) \(value)" }
@@ -24,8 +26,8 @@ public struct CLISetting: Identifiable, Sendable {
 
 public enum CLICatalog {
     private static func s(_ id: String, _ label: String, _ group: String, _ kind: CLISetting.Kind,
-                          _ help: String, reboot: Bool = false, sensitive: Bool = false) -> CLISetting {
-        CLISetting(id: id, label: label, group: group, help: help, kind: kind, requiresReboot: reboot, sensitive: sensitive)
+                          _ help: String, reboot: Bool = false, sensitive: Bool = false, allowsZero: Bool = false) -> CLISetting {
+        CLISetting(id: id, label: label, group: group, help: help, kind: kind, requiresReboot: reboot, sensitive: sensitive, allowsZero: allowsZero)
     }
 
     public static let groups = ["Identity", "Radio", "Routing", "Adverts"]
@@ -55,7 +57,7 @@ public enum CLICatalog {
         s("flood.max.advert", "Max advert hops", "Routing", .number(0...64), "Hop limit for flooded adverts."),
 
         s("flood.advert.interval", "Flood advert interval (h)", "Adverts", .number(3...168), "Hours between network-wide adverts."),
-        s("advert.interval", "Local advert interval (min)", "Adverts", .number(60...240), "Minutes between zero-hop adverts; 0 disables."),
+        s("advert.interval", "Local advert interval (min)", "Adverts", .number(60...240), "Minutes between zero-hop adverts; 0 disables.", allowsZero: true),
     ]
 
     public static var backupable: [CLISetting] { all.filter { !$0.sensitive } }
@@ -70,6 +72,9 @@ public struct CLICommand: Identifiable, Sendable {
     public let symbol: String
     public let destructive: Bool
     public let expectsReply: Bool
+
+    /// What to send now: the serial console sets the clock with `time <epoch>`; `clock sync` only works from a remote login.
+    public var resolvedCommand: String { id == "clocksync" ? "time \(Int(Date().timeIntervalSince1970))" : command }
 
     public static let quickActions: [CLICommand] = [
         .init(id: "advert", title: "Flood advert", command: "advert", symbol: "dot.radiowaves.left.and.right", destructive: false, expectsReply: true),

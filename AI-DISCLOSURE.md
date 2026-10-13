@@ -32,13 +32,14 @@ what did not.
   that every file is understood and that install images for a Heltec V3 and a Wio Tracker L1 can be built.
 - GitHub Actions (`.github/workflows/check.yml`) builds, runs the tests and checks the app's code signature on a macOS runner; it passes.
 - MeshCore's update and clean-install plans were checked against the real v1.17.1 images (partition layout, and that the application inside each merged image matches the app-only file) and against the simulated flasher (an update leaves the filesystem alone; a clean install erases it). They have not been run on a real board.
+- A MeshCore repeater on a real **Heltec V3** (v1.17.1) was used to test the repeater console, writing and restoring settings, the Update and Clean install paths, restoring a full flash backup, and connecting from the app. That testing found and fixed the console parsing and clock-sync bugs listed in the commit history.
 - On a real **Heltec V3**: Meshtastic installs (update and clean install) and MeshCore companion and repeater installs,
   and configuring each over USB.
 
 ## What was not tested
 
 - Installing the OTAFIX bootloader on a real board (the UF2 family and the copy-to-drive flow follow its documentation but were never run), and the board-to-bootloader mapping.
-- nRF52 UF2 installs on a real board (including the clean-install erase: that the bootloader's `INFO_UF2.TXT` really reports its SoftDevice, and that the erase file behaves as described, is untested), restoring a saved flash image on hardware, CH340 and native-USB ESP32 boards, and
+- nRF52 UF2 installs on a real board (including the clean-install erase: that the bootloader's `INFO_UF2.TXT` really reports its SoftDevice, and that the erase file behaves as described, is untested), CH340 and native-USB ESP32 boards, and
   any chip other than the ESP32-S3 on the Heltec V3.
 - Developer ID signing and notarisation (`SIGN_IDENTITY`, `NOTARY_PROFILE` in `Scripts/package.sh`).
 

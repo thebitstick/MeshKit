@@ -62,12 +62,20 @@ public actor RepeaterCLIClient {
         while true {
             try await Task.sleep(for: .milliseconds(40))
             let now = ContinuousClock.now
-            if !buffer.isEmpty && now - lastReceive >= quiet { break }
+            if Self.hasReply(buffer, to: command) && now - lastReceive >= quiet { break }
             if now - start >= timeout { break }
         }
         let reply = Self.clean(buffer, command: command)
         logger?("← \(reply)")
         return (reply, !buffer.isEmpty)
+    }
+
+    /// The firmware echoes a command straight away but can take a second to answer one that writes to flash, so an echo
+    /// alone doesn't mean the reply is complete.
+    static func hasReply(_ raw: String, to command: String) -> Bool {
+        raw.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .contains { $0.trimmingCharacters(in: .whitespaces) != command }
     }
 
     static func clean(_ raw: String, command: String) -> String {
@@ -79,7 +87,11 @@ public actor RepeaterCLIClient {
         return lines.map { line in
             var l = Substring(line)
             while l.first == " " { l = l.dropFirst() }
-            if l.hasPrefix("->") { l = l.dropFirst(2) } else if l.hasPrefix(">") { l = l.dropFirst(1) }
+            if l.hasPrefix("->") {
+                l = l.dropFirst(2)
+                while l.first == " " { l = l.dropFirst() }
+                if l == ">" { l = "" } else if l.hasPrefix("> ") { l = l.dropFirst(2) }
+            } else if l.hasPrefix(">") { l = l.dropFirst(1) }
             while l.first == " " { l = l.dropFirst() }
             return String(l)
         }.joined(separator: "\n")
@@ -102,7 +114,20 @@ public actor RepeaterCLIClient {
     }
 
     public func write(_ setting: CLISetting, value: String) async throws -> String {
-        try await run(setting.setCommand(value), quiet: .milliseconds(250), timeout: .seconds(1.5))
+        try await run(setting.setCommand(value), quiet: .milliseconds(250), timeout: .seconds(4))
+    }
+
+    public struct DeviceError: LocalizedError {
+        public let message: String
+        public var errorDescription: String? { message }
+    }
+
+    /// Runs a command and throws if the device answers with an error such as `ERR: clock cannot go backwards`.
+    @discardableResult
+    public func runChecked(_ command: String, timeout: Duration = .seconds(3)) async throws -> String {
+        let reply = try await run(command, timeout: timeout)
+        if reply.hasPrefix("ERR") { throw DeviceError(message: reply) }
+        return reply
     }
 
     public func readAll(_ settings: [CLISetting], progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> [String: ReadResult] {

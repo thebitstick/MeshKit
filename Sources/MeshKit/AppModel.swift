@@ -307,7 +307,7 @@ final class AppModel {
         await perform("Sending advert") {
             switch session.kind {
             case .companion: try await session.companion?.sendAdvert(flood: true)
-            case .repeater: _ = try await session.cli?.run("advert")
+            case .repeater: try await session.cli?.runChecked("advert")
             case .meshtastic: throw FormError("Meshtastic nodes announce themselves automatically; there's no manual advert.")
             }
             return "Advert sent"
@@ -319,7 +319,7 @@ final class AppModel {
         await perform("Syncing clock") {
             switch session.kind {
             case .companion: try await session.companion?.syncClock()
-            case .repeater: _ = try await session.cli?.run("clock sync")
+            case .repeater: try await session.cli?.runChecked("time \(Int(Date().timeIntervalSince1970))")
             case .meshtastic: try await session.meshtastic?.syncClock()
             }
             return "Clock synced"
