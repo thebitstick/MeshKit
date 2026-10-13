@@ -5,6 +5,7 @@ enum FlashPayload {
     case uf2(Data, erase: NRF52EraseImages?)
     case bootloaderUpdate(Data)
     case nrfSerialDFU(NRF52DFUPackage)
+    case uf2Restore(Data)
     case esp(ESPFlashJob)
 }
 
@@ -25,6 +26,8 @@ struct FlashRequest: Identifiable {
     var eraseDefault = false
     var warning: String?
     var details: [String] = []
+    /// Whether the sheet offers to save the board's current firmware first (nRF52 UF2 installs).
+    var allowsBackup = true
     /// Shown under the bootloader-drive picker for the drive that is selected.
     var volumeNote: (@Sendable (UF2Volume) -> String?)?
     let prepare: @Sendable (FlashContext) async throws -> FlashPayload
@@ -144,6 +147,16 @@ struct FlashRequest: Identifiable {
     }
 
     // MARK: Saved and local images
+
+    static func restoreNRF52(_ entry: NRF52BackupStore.Entry) -> FlashRequest {
+        FlashRequest(
+            title: "Restore \(entry.board) firmware",
+            subtitle: "Saved \(entry.date.formatted(date: .abbreviated, time: .shortened)) · \(entry.size >> 10) KB",
+            target: .uf2, prepareTitle: "Read the saved image",
+            warning: "This puts the SoftDevice and application back as they were when the image was saved. The bootloader is not touched. Settings stored after the image was saved are not part of it.",
+            allowsBackup: false,
+            prepare: { _ in .uf2Restore(try Data(contentsOf: entry.url)) })
+    }
 
     static func restore(_ entry: FlashBackupStore.Entry) -> FlashRequest {
         FlashRequest(

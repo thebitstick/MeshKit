@@ -73,6 +73,14 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   plus the app, read out of the merged image after parsing its partition table, so nvs and the filesystem (identity,
   settings) survive; resetting otadata makes the bootloader pick app0 even after an OTA. *Clean install* erases and
   writes the merged image at 0x0. Only the merged image is downloaded. nRF52 UF2 has no erase of its own: a *Clean install* there first copies Meshtastic's `Meshtastic_nRF52_factory_erase_v3_S140_<7.3.0|6.1.0>.uf2` (read by range from a Meshtastic release's nrf52840 zip; MeshCore uses the latest stable Meshtastic release) to the bootloader drive, waits for the drive to come back, then copies the firmware. The file is chosen from the `SoftDevice:` line of `INFO_UF2.TXT` (real boards print it, e.g. `S140 7.3.0`); if that is missing or unknown the clean install refuses. The erase tool is an Arduino program that does nothing until a host opens its USB serial port, then prints `Formating ... Done, rebooting device into DFU mode` and returns the board to the bootloader, so `UF2VolumeFlasher` opens the `usbmodem` port every few seconds while waiting for the drive.
+- **DFU button (nRF52):** `NRF52DFUMode.enter` works on any firmware, answering or not. It probes for a Meshtastic node
+  (4 s) and, if one answers, sends `enter_dfu_mode_request` (UF2 drive appears); otherwise it does the 1200-baud touch
+  (serial DFU, no drive; firmware then goes in through "Install over USB serial", which works the same whatever the
+  firmware was). Shown next to every `usbmodem` port and in Device ▸ Enter DFU Mode.
+- **nRF52 backups:** UF2 installs read `CURRENT.UF2` from the bootloader drive first and save it to
+  `~/Library/Application Support/MeshKit/NRF52Backups` (SoftDevice and application, family `0x28861667`, no settings,
+  no bootloader). `UF2VolumeFlasher(content: .restore)` writes one back; it is the only mode that accepts that family. A
+  failed backup stops the install before anything is written, and the sheet's toggle turns the backup off.
 - **Serial DFU (nRF52):** `NRF52SerialDFUFlasher` speaks the Adafruit bootloader's serial DFU (Nordic legacy HCI/SLIP, as
   `adafruit-nrfutil` and MeshCore's web flasher do): 1200-baud touch with DTR dropped, reopen at 115200, then START
   (command 3, mode 4 = application, sizes), INIT (command 1 + `.dat` + two zero bytes), DATA (command 4, 512 bytes) and

@@ -246,10 +246,8 @@ struct MeshKitCommands: Commands {
                 .disabled(focused?.canSendCommands != true)
             Button("Reboot Device") { Task { await focused?.rebootDevice() } }
                 .disabled(focused?.canSendCommands != true)
-            if focused?.vendor == .meshtastic {
-                Button("Restart into Bootloader (nRF52)") { Task { await focused?.restartIntoBootloader() } }
-                    .disabled(focused?.canEnterBootloader != true)
-            }
+            Button("Enter DFU Mode (nRF52)") { Task { await focused?.enterDFUModeOnLikelyPort() } }
+                .disabled(focused?.dfuCandidatePorts.isEmpty != false)
 
             if let model = focused, model.vendor == .meshcore {
                 Menu("Radio Preset") {

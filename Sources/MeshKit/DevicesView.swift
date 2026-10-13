@@ -32,6 +32,11 @@ struct DevicesView: View {
                             }
                             Spacer()
                             if model.connectingTo == port.displayName { ProgressView().controlSize(.small) }
+                            if port.path.contains("usbmodem") {
+                                Button("DFU") { Task { await model.enterDFUMode(port: port) } }
+                                    .help("Restart this nRF52 board into DFU mode, whatever firmware it runs")
+                                    .disabled(model.connectingTo != nil)
+                            }
                             Button("Connect") { Task { await model.connect(port: port); if model.session != nil { model.showingDevices = false } } }
                                 .disabled(model.connectingTo != nil || model.session?.portName == port.displayName)
                         }
@@ -39,7 +44,7 @@ struct DevicesView: View {
                     }
                 }
 
-                Card("UF2 bootloader volumes", symbol: "externaldrive", footnote: "Double-tap reset on an nRF52 board to mount its bootloader drive.") {
+                Card("UF2 bootloader volumes", symbol: "externaldrive", footnote: "The DFU button next to an nRF52 board's serial port restarts a Meshtastic node into this drive; otherwise double-tap reset.") {
                     if model.uf2Volumes.isEmpty { EmptyRow(text: "No UF2 bootloader drives mounted.") }
                     ForEach(model.uf2Volumes) { v in
                         HStack {

@@ -34,6 +34,7 @@ struct BackupsView: View {
                 }
                 if let snap = selected { detail(snap) }
                 flashBackupCard
+                nrfBackupCard
             }
             .padding(24)
             .frame(maxWidth: 720, alignment: .leading)
@@ -94,6 +95,30 @@ struct BackupsView: View {
         guard let session = model.session else { return }
         restoring = true; defer { restoring = false }
         do { message = "Restored \(try await model.restore(snap, to: session)) settings." } catch { message = error.localizedDescription }
+    }
+
+    private var nrfBackupCard: some View {
+        Card("nRF52 firmware", symbol: "memorychip",
+             footnote: "The SoftDevice and application on an nRF52 board, saved from its bootloader drive before each UF2 install. They don't include the board's settings.") {
+            if model.nrfBackups.isEmpty {
+                EmptyRow(text: "None yet. They appear here after a UF2 install on an nRF52 board with the backup option on.")
+            }
+            ForEach(model.nrfBackups) { entry in
+                HStack {
+                    Image(systemName: "memorychip").foregroundStyle(.secondary).frame(width: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(entry.board) · \(entry.size >> 10) KB")
+                        Text(entry.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Restore…") { model.pendingFlash = .restoreNRF52(entry) }
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) } label: { Image(systemName: "magnifyingglass") }
+                        .help("Show in Finder")
+                    Button(role: .destructive) { try? FileManager.default.removeItem(at: entry.url); model.reloadFlashBackups() } label: { Image(systemName: "trash") }
+                        .help("Delete")
+                }
+            }
+        }
     }
 
     private var flashBackupCard: some View {

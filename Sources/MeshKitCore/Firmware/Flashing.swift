@@ -49,18 +49,20 @@ public struct NRF52EraseImages: Sendable {
 }
 
 public struct UF2VolumeFlasher: Flasher {
-    public enum Content: Sendable { case application, bootloaderUpdate }
+    public enum Content: Sendable { case application, bootloaderUpdate, restore }
 
     public let volume: UF2Volume
     public let image: Data
     public let erase: NRF52EraseImages?
     public let content: Content
+    private let onBackup: (@Sendable (Data) throws -> Void)?
     private let findVolumes: @Sendable () -> [UF2Volume]
     private let candidatePorts: @Sendable () -> [String]
     private let holdPort: @Sendable (String, Duration) async -> Void
     private let returnTimeout: Duration
 
     public init(volume: UF2Volume, image: Data, erase: NRF52EraseImages? = nil, content: Content = .application,
+                onBackup: (@Sendable (Data) throws -> Void)? = nil,
                 findVolumes: @escaping @Sendable () -> [UF2Volume] = { UF2Volumes.detect() },
                 candidatePorts: @escaping @Sendable () -> [String] = { SerialDiscovery.list().map(\.path).filter { $0.contains("usbmodem") } },
                 holdPort: @escaping @Sendable (String, Duration) async -> Void = { path, duration in
@@ -69,12 +71,13 @@ public struct UF2VolumeFlasher: Flasher {
                     port.close()
                 },
                 returnTimeout: Duration = .seconds(90)) {
-        self.volume = volume; self.image = image; self.erase = erase; self.content = content
+        self.volume = volume; self.image = image; self.erase = erase; self.content = content; self.onBackup = onBackup
         self.findVolumes = findVolumes; self.candidatePorts = candidatePorts; self.holdPort = holdPort; self.returnTimeout = returnTimeout
     }
 
     public var steps: [FlashStep] {
         var s: [FlashStep] = [.init(id: "verify", title: content == .bootloaderUpdate ? "Check the bootloader update" : "Check UF2 image")]
+        if onBackup != nil { s.append(.init(id: "backup", title: "Back up the current firmware")) }
         if erase != nil {
             s += [.init(id: "erase", title: "Erase the board"), .init(id: "return", title: "Wait for the bootloader drive to return")]
         }
@@ -85,7 +88,11 @@ public struct UF2VolumeFlasher: Flasher {
     public func run(update: @escaping @Sendable (String, FlashStep.State) -> Void) async throws {
         update("verify", .running(nil))
         let info = try UF2.inspect(image)
-        let accepted = content == .bootloaderUpdate ? info.familyID == OTAFix.updateFamily : info.isNRF52
+        let accepted: Bool = switch content {
+        case .bootloaderUpdate: info.familyID == OTAFix.updateFamily
+        case .restore: true
+        case .application: info.isNRF52
+        }
         guard accepted else {
             let msg = content == .bootloaderUpdate ? "This is not a bootloader update image." : "Image targets \(info.familyName), not nRF52"
             update("verify", .failed(msg))
@@ -103,6 +110,17 @@ public struct UF2VolumeFlasher: Flasher {
         }
         update("verify", .done)
 
+        if let onBackup {
+            update("backup", .running(nil))
+            do {
+                try onBackup(try UF2Flasher.readCurrentImage(from: volume))
+                update("backup", .done)
+            } catch {
+                let msg = "Couldn't back up the current firmware (\(error.localizedDescription)). Turn off the backup option to install without one."
+                update("backup", .failed(msg))
+                throw UF2Error.writeFailed(msg)
+            }
+        }
         var target = volume
         if let eraseImage {
             update("erase", .running(0))

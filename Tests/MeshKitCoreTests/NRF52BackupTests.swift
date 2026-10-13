@@ -1,0 +1,72 @@
+import Foundation
+import Testing
+@testable import MeshKitCore
+
+@Suite struct NRF52BackupTests {
+    private func temporary() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nrfbackup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// What a bootloader's CURRENT.UF2 looks like: SoftDevice and application, family 0x28861667 (not nRF52840).
+    private func currentImage(blocks: Int = 6) -> Data { UF2Tests.makeUF2(blocks: blocks, family: 0x2886_1667) }
+
+    @Test func savesAndListsBackupsNewestFirst() throws {
+        let dir = try temporary()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let older = Date(timeIntervalSince1970: 1_790_000_000), newer = older.addingTimeInterval(3_600)
+        try NRF52BackupStore.save(currentImage(), board: "Seeed TRACKER L1", date: older, in: dir)
+        try NRF52BackupStore.save(currentImage(blocks: 3), board: "Heltec T114", date: newer, in: dir)
+        try Data("junk".utf8).write(to: dir.appendingPathComponent("notes.txt"))
+        let list = NRF52BackupStore.list(in: dir)
+        #expect(list.map(\.board) == ["Heltec T114", "Seeed TRACKER L1"])
+        #expect(list[0].size == 3 * 512 && list[1].size == 6 * 512)
+        #expect(abs(list[1].date.timeIntervalSince(older)) < 1)
+    }
+
+    @Test func refusesToSaveSomethingThatIsNotAUF2() throws {
+        let dir = try temporary()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(throws: UF2Error.self) { try NRF52BackupStore.save(Data("nope".utf8), board: "x", in: dir) }
+        #expect(NRF52BackupStore.list(in: dir).isEmpty)
+    }
+
+    private func fakeVolume(current: Data?) throws -> (UF2Volume, URL) {
+        let dir = try temporary()
+        if let current { try current.write(to: dir.appendingPathComponent("CURRENT.UF2")) }
+        return (UF2Volume(url: dir, model: "Seeed TRACKER L1", boardID: "TRACKER L1", bootloader: ""), dir)
+    }
+
+    @Test func anInstallSavesTheCurrentFirmwareFirst() async throws {
+        let current = currentImage()
+        let (volume, dir) = try fakeVolume(current: current)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let saved = Locked<[Data]>([])
+        let flasher = UF2VolumeFlasher(volume: volume, image: UF2Tests.makeUF2(blocks: 4), onBackup: { saved.value.append($0) })
+        #expect(flasher.steps.map(\.id) == ["verify", "backup", "write", "reboot"])
+        try await flasher.run { _, _ in }
+        #expect(saved.value == [current])
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("NEW.UF2").path))
+    }
+
+    @Test func aFailedBackupStopsBeforeAnythingIsWritten() async throws {
+        let (volume, dir) = try fakeVolume(current: nil)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let flasher = UF2VolumeFlasher(volume: volume, image: UF2Tests.makeUF2(blocks: 4), onBackup: { _ in })
+        await #expect(throws: UF2Error.self) { try await flasher.run { _, _ in } }
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("NEW.UF2").path))
+    }
+
+    @Test func aSavedImageCanBeRestoredButNotInstalledAsFirmware() async throws {
+        let image = currentImage()
+        let (volume, dir) = try fakeVolume(current: nil)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let asApplication = UF2VolumeFlasher(volume: volume, image: image)
+        await #expect(throws: UF2Error.self) { try await asApplication.run { _, _ in } }
+        let restore = UF2VolumeFlasher(volume: volume, image: image, content: .restore)
+        #expect(restore.steps.map(\.id) == ["verify", "write", "reboot"])
+        try await restore.run { _, _ in }
+        #expect(try Data(contentsOf: dir.appendingPathComponent("NEW.UF2")) == image)
+    }
+}

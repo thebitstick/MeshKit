@@ -8,6 +8,7 @@ struct FlashSheet: View {
 
     @AppStorage("espBaud") private var baud = 460_800
     @AppStorage("espBackupFirst") private var backupFirst = true
+    @AppStorage("nrfBackupFirst") private var nrfBackupFirst = true
     @State private var eraseFirst = false
 
     @State private var volumeID: String?
@@ -79,6 +80,12 @@ struct FlashSheet: View {
         }
     }
 
+    private func uf2Backup(for volume: UF2Volume) -> (@Sendable (Data) throws -> Void)? {
+        guard nrfBackupFirst, request.allowsBackup else { return nil }
+        let board = volume.model.isEmpty ? volume.boardID : volume.model
+        return { image in try NRF52BackupStore.save(image, board: board) }
+    }
+
     private static let defaultESPWarning = "This rewrites the board's flash. A backup of the current flash is saved first unless you turn that off."
 
     private var confirmTitle: String { "Install \(request.title.replacingOccurrences(of: "Install ", with: "")) on \((isUF2 ? volume?.name : port?.displayName) ?? "the board")?" }
@@ -92,11 +99,16 @@ struct FlashSheet: View {
             if model.uf2Volumes.isEmpty {
                 Text("Double-tap the reset button so the board's drive mounts. This list updates automatically.")
                     .font(.callout).foregroundStyle(.secondary)
-                if model.canEnterBootloader {
-                    Button("Restart the connected node into its bootloader") { Task { await model.restartIntoBootloader() } }
+                if !model.dfuCandidatePorts.isEmpty {
+                    Button("Enter DFU mode") { Task { await model.enterDFUModeOnLikelyPort() } }
                 }
-            } else if let volume, let note = request.volumeNote?(volume) {
-                Text(note).font(.callout).foregroundStyle(.secondary)
+            } else {
+                if let volume, let note = request.volumeNote?(volume) {
+                    Text(note).font(.callout).foregroundStyle(.secondary)
+                }
+                if request.allowsBackup {
+                    Toggle("Back up the current firmware first", isOn: $nrfBackupFirst)
+                }
             }
         } else {
             Picker("Serial port", selection: $portID) {
@@ -145,10 +157,13 @@ struct FlashSheet: View {
         switch payload {
         case .uf2(let data, let erase):
             guard let volume else { failure = "No bootloader drive is mounted."; return }
-            flasher = UF2VolumeFlasher(volume: volume, image: data, erase: erase)
+            flasher = UF2VolumeFlasher(volume: volume, image: data, erase: erase, onBackup: uf2Backup(for: volume))
         case .bootloaderUpdate(let data):
             guard let volume else { failure = "No bootloader drive is mounted."; return }
-            flasher = UF2VolumeFlasher(volume: volume, image: data, content: .bootloaderUpdate)
+            flasher = UF2VolumeFlasher(volume: volume, image: data, content: .bootloaderUpdate, onBackup: uf2Backup(for: volume))
+        case .uf2Restore(let data):
+            guard let volume else { failure = "No bootloader drive is mounted."; return }
+            flasher = UF2VolumeFlasher(volume: volume, image: data, content: .restore)
         case .nrfSerialDFU(let package):
             guard let port else { failure = "No serial port is selected."; return }
             if model.session?.portName == port.displayName { model.disconnect(); try? await Task.sleep(for: .milliseconds(300)) }

@@ -225,14 +225,8 @@ public struct NRF52SerialDFUFlasher: Flasher {
         }
     }
 
-    /// The "1200 baud touch": opening the port at 1200 baud and dropping DTR reboots an Adafruit nRF52 board into serial DFU.
     private func touch() async throws {
-        let port = try SerialPort(path: portPath, baud: 1200)
-        try port.setLines(dtr: true, rts: false)
-        try await Task.sleep(for: .milliseconds(150))
-        try port.setLines(dtr: false, rts: false)
-        try await Task.sleep(for: .milliseconds(250))
-        port.close()
+        try await NRF52DFUMode.touch(path: portPath)
         logger?("touched \(portPath) at 1200 baud")
         try await sleep(1.5)
     }

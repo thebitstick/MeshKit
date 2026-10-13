@@ -212,7 +212,7 @@ import Testing
         try await Task.sleep(for: .milliseconds(2500))
         let mesh = MeshtasticClient(transport: transport, logger: { print("  log:", $0) })
         if await mesh.probe(timeout: 4), let state = try? await mesh.connect() {
-            print("MESHTASTIC", state.nodeID, state.metadata?.firmwareVersion ?? "?", state.metadata?.hwModel ?? .unset, state.owner?.longName ?? "?")
+            print("MESHTASTIC", state.nodeID, state.metadata?.firmwareVersion ?? "?", state.metadata?.hwModel ?? .unset, state.owner?.longName ?? "?", "NODES", state.nodes.map { String(format: "!%08x", $0.num) + ":" + $0.user.longName + ":" + $0.user.id }, "myinfo", String(format: "!%08x", state.myInfo?.myNodeNum ?? 0))
             await mesh.stop(); return
         }
         await mesh.stop()
@@ -455,5 +455,66 @@ import Testing
         print("MT AFTER DFU", state.nodeID, state.metadata?.firmwareVersion ?? "?", state.owner?.longName ?? "?")
         await client.stop()
         HardwareTests.closePorts()
+    }
+
+    @Test func nrfDFUButtonAndBackups() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-dfu-button" else { return }
+        let log: @Sendable (String) -> Void = { print("  log:", $0) }
+        HardwareTests.closePorts()
+
+        print("A: Meshtastic -> DFU button")
+        var outcome = try await NRF52DFUMode.enter(path: path, logger: log)
+        print("OUTCOME A", outcome)
+        #expect(outcome == .uf2Drive)
+        for _ in 0..<40 where UF2Volumes.detect().isEmpty { try await Task.sleep(for: .milliseconds(500)) }
+        try await Task.sleep(for: .seconds(1))
+        let volume = try Self.nrfVolume()
+        let (image, _) = try await Self.meshCoreUF2(role: .companion, board: "WioTrackerL1", variantContains: "usb")
+        let backupDir = FileManager.default.temporaryDirectory.appendingPathComponent("nrfbackup-hw-\(UUID().uuidString)")
+        let flasher = UF2VolumeFlasher(volume: volume, image: image, onBackup: { try NRF52BackupStore.save($0, board: volume.model, in: backupDir) })
+        print("STEPS", flasher.steps.map(\.id))
+        try await flasher.run { id, state in if case .done = state { print("  step \(id): done") }; if case .failed(let m) = state { print("  step \(id): FAILED \(m)") } }
+        let saved = NRF52BackupStore.list(in: backupDir)
+        print("BACKUPS", saved.map { "\($0.board) \($0.size)" })
+        #expect(saved.count == 1)
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(5))
+        var (companion, info, me) = try await Self.companion(path)
+        print("COMPANION UP", info.semanticVersion, me.name)
+        await companion.stop()
+        HardwareTests.closePorts()
+
+        print("B: MeshCore -> DFU button (not a Meshtastic node)")
+        outcome = try await NRF52DFUMode.enter(path: path, logger: log)
+        print("OUTCOME B", outcome)
+        #expect(outcome == .serialDFU)
+        let catalog = MeshtasticCatalog()
+        let release = try #require(try await catalog.releases(limit: 30).first { $0.channel == .stable })
+        let board = try #require(try await catalog.boards(in: release).first { $0.slug == "seeed_wio_tracker_L1" })
+        let package = try await NRF52DFUPackage.read(zip: try await catalog.package(for: board, in: release).dfuPackage())
+        try await NRF52SerialDFUFlasher(portPath: path, package: package, logger: log).run { id, state in if case .done = state { print("  step \(id): done") } }
+        HardwareTests.closePorts()
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(8))
+        let (mt, state) = try await Self.meshtastic(path)
+        print("MESHTASTIC BACK", state.nodeID, state.owner?.longName ?? "?")
+        await mt.stop()
+        HardwareTests.closePorts()
+
+        print("C: restore the saved image")
+        outcome = try await NRF52DFUMode.enter(path: path, logger: log)
+        print("OUTCOME C", outcome)
+        for _ in 0..<40 where UF2Volumes.detect().isEmpty { try await Task.sleep(for: .milliseconds(500)) }
+        try await Task.sleep(for: .seconds(1))
+        let entry = try #require(saved.first)
+        let restore = UF2VolumeFlasher(volume: try Self.nrfVolume(), image: try Data(contentsOf: entry.url), content: .restore)
+        try await restore.run { id, state in if case .done = state { print("  step \(id): done") }; if case .failed(let m) = state { print("  step \(id): FAILED \(m)") } }
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(8))
+        let (mt2, state2) = try await Self.meshtastic(path)
+        print("AFTER RESTORE", state2.nodeID, state2.owner?.longName ?? "?", state2.metadata?.firmwareVersion ?? "?")
+        await mt2.stop()
+        HardwareTests.closePorts()
+        try? FileManager.default.removeItem(at: backupDir)
     }
 }
