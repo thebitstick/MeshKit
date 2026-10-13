@@ -126,8 +126,9 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   `advert.interval` takes 0 (off) or 60-240; a freshly erased board takes several seconds to boot and prints
   `Repeater ID: …` before the console answers.
 - A board that was just flashed or reset takes several seconds to start answering (a clean install or first boot of
-  MeshCore companion needed about 6 s, Meshtastic about 15 s); the app retries the probe once after 4 s. A Meshtastic
-  node number can change when moving between releases (stable to alpha changed it on a Heltec V3).
+  MeshCore companion needed about 6 s, Meshtastic about 15 s); the app retries the probe once after 4 s. Meshtastic 2.8
+  gives a node a new node number (confirmed by the user; stable to alpha changed it on a Heltec V3), so a changed ID after
+  moving to 2.8 is the firmware, not MeshKit.
 - Radio presets come from `api.meshcore.nz`, cached 24 hours, with a bundled snapshot as the offline fallback.
 
 ## Working agreements
