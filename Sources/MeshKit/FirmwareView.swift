@@ -259,7 +259,7 @@ private struct MeshCoreBoardDetail: View {
                 Card("Install", symbol: "bolt.fill", footnote: installFootnote(build)) {
                     HStack {
                         Button { if let r = fw.meshCoreRequest(model: model) { model.pendingFlash = r } } label: {
-                            Label("Install \(fw.role.title)\(connection.map { " · \($0.title)" } ?? "")…", systemImage: "square.and.arrow.down")
+                            Label("Install", systemImage: "square.and.arrow.down")
                         }
                         .buttonStyle(.borderedProminent)
                         .fixedSize()
@@ -319,7 +319,7 @@ private struct MeshtasticBoardDetail: View {
                 Card("Install", symbol: "bolt.fill", footnote: "Only this board's files are downloaded, not the whole multi-board package, and each is checked against the checksum published with the release.") {
                     HStack {
                         Button { if let r = fw.meshtasticRequest() { model.pendingFlash = r } } label: {
-                            Label("Install Meshtastic…", systemImage: "square.and.arrow.down")
+                            Label("Install", systemImage: "square.and.arrow.down")
                         }
                         .buttonStyle(.borderedProminent)
                         .fixedSize()

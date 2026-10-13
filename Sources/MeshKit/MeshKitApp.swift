@@ -359,17 +359,18 @@ struct WelcomeView: View {
         }
         .padding(.top, 48).padding(.bottom, 32).padding(.horizontal, 32)
         .frame(width: 460)
-        .background(WindowPlacer())
+        .background(WindowPlacer(raised: true))
         .task {
             if let launch = LaunchOptions.current { openDeviceWindow(launch.vendor, openWindow, dismissWindow) }
         }
     }
 }
 
-/// Opens the window at a fixed size, centred on its screen a little above the middle where the eye expects it, and
-/// stops macOS from restoring whatever frame it had last time.
+/// Opens the window at a fixed size, centred on its screen (`raised` puts it a little above the middle), and stops
+/// macOS from restoring whatever frame it had last time.
 struct WindowPlacer: NSViewRepresentable {
     var size: CGSize?
+    var raised = false
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -379,7 +380,7 @@ struct WindowPlacer: NSViewRepresentable {
             if let size { window.setContentSize(size) }
             let area = screen.visibleFrame
             window.setFrameOrigin(NSPoint(x: area.midX - window.frame.width / 2,
-                                          y: area.midY - window.frame.height / 2 + area.height * 0.08))
+                                          y: area.midY - window.frame.height / 2 + (raised ? area.height * 0.08 : 0)))
         }
         return view
     }
