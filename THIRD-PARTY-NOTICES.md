@@ -23,6 +23,7 @@ The protobuf bindings are why MeshKit as a whole is GPL-3.0.
 ## Data fetched at run time
 
 - Firmware from the GitHub releases of MeshCore (MIT) and Meshtastic (GPL-3.0). Nothing is redistributed with MeshKit.
+- The OTAFIX bootloader update files from the GitHub releases of `oltaco/Adafruit_nRF52_Bootloader_OTAFIX` (a fork of the MIT-licensed Adafruit nRF52 bootloader), only when the user chooses to download or install one. Nothing is redistributed with MeshKit.
 - Board names from `api.meshtastic.org`, and radio presets from the community list at `api.meshcore.nz`.
 
 ## Trademarks

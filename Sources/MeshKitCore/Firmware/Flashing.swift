@@ -49,21 +49,24 @@ public struct NRF52EraseImages: Sendable {
 }
 
 public struct UF2VolumeFlasher: Flasher {
+    public enum Content: Sendable { case application, bootloaderUpdate }
+
     public let volume: UF2Volume
     public let image: Data
     public let erase: NRF52EraseImages?
+    public let content: Content
     private let findVolumes: @Sendable () -> [UF2Volume]
     private let returnTimeout: Duration
 
-    public init(volume: UF2Volume, image: Data, erase: NRF52EraseImages? = nil,
+    public init(volume: UF2Volume, image: Data, erase: NRF52EraseImages? = nil, content: Content = .application,
                 findVolumes: @escaping @Sendable () -> [UF2Volume] = { UF2Volumes.detect() },
                 returnTimeout: Duration = .seconds(60)) {
-        self.volume = volume; self.image = image; self.erase = erase
+        self.volume = volume; self.image = image; self.erase = erase; self.content = content
         self.findVolumes = findVolumes; self.returnTimeout = returnTimeout
     }
 
     public var steps: [FlashStep] {
-        var s: [FlashStep] = [.init(id: "verify", title: "Check UF2 image")]
+        var s: [FlashStep] = [.init(id: "verify", title: content == .bootloaderUpdate ? "Check the bootloader update" : "Check UF2 image")]
         if erase != nil {
             s += [.init(id: "erase", title: "Erase the board"), .init(id: "return", title: "Wait for the bootloader drive to return")]
         }
@@ -74,8 +77,9 @@ public struct UF2VolumeFlasher: Flasher {
     public func run(update: @escaping @Sendable (String, FlashStep.State) -> Void) async throws {
         update("verify", .running(nil))
         let info = try UF2.inspect(image)
-        guard info.isNRF52 else {
-            let msg = "Image targets \(info.familyName), not nRF52"
+        let accepted = content == .bootloaderUpdate ? info.familyID == OTAFix.updateFamily : info.isNRF52
+        guard accepted else {
+            let msg = content == .bootloaderUpdate ? "This is not a bootloader update image." : "Image targets \(info.familyName), not nRF52"
             update("verify", .failed(msg))
             throw UF2Error.writeFailed(msg)
         }

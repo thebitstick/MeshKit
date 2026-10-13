@@ -231,7 +231,7 @@ private struct MeshCoreBoardDetail: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text(group.title).font(.title2.weight(.semibold))
-                        if let build { FirmwareFilesMenu(artifacts: build.artifacts) }
+                        BoardMenu(artifacts: build?.artifacts ?? [], dfuBoardID: build?.isUF2 == true ? OTAFix.boardID(meshCoreSlug: group.board) : nil, boardName: group.title)
                     }
                     Text(subtitle(build)).foregroundStyle(.secondary)
                 }
@@ -299,7 +299,10 @@ private struct MeshtasticBoardDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(board.displayName).font(.title2.weight(.semibold))
+                    HStack(spacing: 8) {
+                        Text(board.displayName).font(.title2.weight(.semibold))
+                        BoardMenu(dfuBoardID: board.isNRF52 ? OTAFix.boardID(meshtasticSlug: board.slug) : nil, boardName: board.displayName)
+                    }
                     HStack(spacing: 6) {
                         Text("Meshtastic v\(release.version)").foregroundStyle(.secondary)
                         Pill(text: release.channel.rawValue)
@@ -334,23 +337,47 @@ private struct MeshtasticBoardDetail: View {
     }
 }
 
-/// The release's files for a board, for people who want to flash them with another tool.
-struct FirmwareFilesMenu: View {
+/// Extras for a board, kept out of the way: the release's files for people who want to flash them with another tool,
+/// and the OTAFIX bootloader for nRF52 boards.
+struct BoardMenu: View {
     @Environment(AppModel.self) private var model
-    let artifacts: [FirmwareArtifact]
+    var artifacts: [FirmwareArtifact] = []
+    var dfuBoardID: String?
+    var boardName: String
 
     var body: some View {
+        if !artifacts.isEmpty || dfuBoardID != nil { menu }
+    }
+
+    private var menu: some View {
         let fw = model.firmware
-        Menu {
-            Section("Firmware files") {
-                ForEach(artifacts) { artifact in
-                    let size = ByteCountFormatter.string(fromByteCount: Int64(artifact.asset.size), countStyle: .file)
-                    if fw.downloading.contains(artifact.id) {
-                        Text("Downloading \(artifact.kind.rawValue)…")
-                    } else if let url = fw.downloaded[artifact.id] {
-                        Button("Show \(artifact.kind.rawValue) in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                    } else {
-                        Button("Download \(artifact.kind.rawValue) (\(size))") { Task { _ = await fw.download(artifact) } }
+        return Menu {
+            if !artifacts.isEmpty {
+                Section("Firmware files") {
+                    ForEach(artifacts) { artifact in
+                        let size = ByteCountFormatter.string(fromByteCount: Int64(artifact.asset.size), countStyle: .file)
+                        if fw.downloading.contains(artifact.id) {
+                            Text("Downloading \(artifact.kind.rawValue)…")
+                        } else if let url = fw.downloaded[artifact.id] {
+                            Button("Show \(artifact.kind.rawValue) in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        } else {
+                            Button("Download \(artifact.kind.rawValue) (\(size))") { Task { _ = await fw.download(artifact) } }
+                        }
+                    }
+                }
+            }
+            if let id = dfuBoardID {
+                Section("Bluetooth DFU bootloader") {
+                    Button("Install DFU bootloader fix") { model.pendingFlash = .dfuBootloaderFix(boardID: id, boardName: boardName) }
+                    Button("Download DFU bootloader fix") {
+                        Task {
+                            await model.perform("Downloading the bootloader fix") {
+                                let update = try await OTAFix.latestUpdate(for: id)
+                                let url = try await OTAFix.download(update)
+                                NSWorkspace.shared.activateFileViewerSelecting([url])
+                                return "Downloaded \(update.asset.name)"
+                            }
+                        }
                     }
                 }
             }
@@ -360,7 +387,7 @@ struct FirmwareFilesMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Download the firmware files")
+        .help("Firmware files and bootloader")
     }
 }
 

@@ -78,4 +78,14 @@ import Testing
         }
         #expect(checked >= 2, "only \(checked) boards were checked")
     }
+
+    @Test func everyMappedBoardHasABootloaderUpdateInTheLatestOTAFIXRelease() async throws {
+        guard enabled else { return }
+        let release = try await OTAFix.latestRelease()
+        for id in OTAFix.boardIDs.sorted() { _ = try OTAFix.update(for: id, in: release) }
+        let update = try OTAFix.update(for: "heltec_t114", in: release)
+        let data = try Data(contentsOf: try await OTAFix.download(update))
+        let info = try UF2.inspect(data)
+        #expect(info.familyID == OTAFix.updateFamily && info.lowestAddress == 0)
+    }
 }

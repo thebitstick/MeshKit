@@ -3,6 +3,7 @@ import SwiftUI
 
 enum FlashPayload {
     case uf2(Data, erase: NRF52EraseImages?)
+    case bootloaderUpdate(Data)
     case esp(ESPFlashJob)
 }
 
@@ -85,6 +86,21 @@ struct FlashRequest: Identifiable {
                 : "The firmware is replaced and your settings are kept."
         }
         return request
+    }
+
+    // MARK: Bootloader
+
+    static func dfuBootloaderFix(boardID: String, boardName: String) -> FlashRequest {
+        FlashRequest(
+            title: "Install DFU bootloader fix",
+            subtitle: "OTAFIX bootloader for \(boardName)",
+            target: .uf2, prepareTitle: "Download the bootloader update",
+            warning: "This replaces the board's bootloader with the OTAFIX build, which makes Bluetooth firmware updates more reliable. It is for \(boardName) only: the wrong file can leave a board that needs a hardware programmer to recover. Keep the board plugged in until it reboots. Your firmware and settings are not touched.",
+            prepare: { _ in
+                let update = try await OTAFix.latestUpdate(for: boardID)
+                let url = try await OTAFix.download(update)
+                return .bootloaderUpdate(try Data(contentsOf: url))
+            })
     }
 
     // MARK: Saved and local images

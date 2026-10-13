@@ -72,6 +72,11 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   plus the app, read out of the merged image after parsing its partition table, so nvs and the filesystem (identity,
   settings) survive; resetting otadata makes the bootloader pick app0 even after an OTA. *Clean install* erases and
   writes the merged image at 0x0. Only the merged image is downloaded. nRF52 UF2 has no erase of its own: a *Clean install* there first copies Meshtastic's `Meshtastic_nRF52_factory_erase_v3_S140_<7.3.0|6.1.0>.uf2` (read by range from a Meshtastic release's nrf52840 zip; MeshCore uses the latest stable Meshtastic release) to the bootloader drive, waits for the drive to come back, then copies the firmware. The file is chosen from the `SoftDevice:` line of `INFO_UF2.TXT`; if that is missing or unknown the clean install refuses.
+- **DFU bootloader fix (nRF52):** the three-dot menu offers the OTAFIX bootloader (`oltaco/Adafruit_nRF52_Bootloader_OTAFIX`,
+  recommended by MeshCore's FAQ). Per-board `update-<board>_bootloader-…_nosd.uf2` files are copied to the UF2 drive like
+  firmware; their UF2 family is `0xD663823C`, not nRF52840, so `UF2VolumeFlasher(content: .bootloaderUpdate)` checks for
+  that family instead. Board slugs from MeshCore and Meshtastic map to OTAFIX board ids in `OTAFix.swift`; only boards
+  with a confident match get the menu items, because the wrong bootloader can brick a board.
 - **Meshtastic admin writes** go to our own node, reliable, with `from == 0`; the session key is only enforced for
   packets with `from != 0`; a managed node ignores local admin, and the app says so.
 - **Release data is untrusted.** Tag and asset names go through `ReleaseClient.safeComponent` before touching a
