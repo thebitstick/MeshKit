@@ -9,8 +9,23 @@ import Testing
     static var step: String { ProcessInfo.processInfo.environment["MESHKIT_HARDWARE_STEP"] ?? "" }
     static var out: URL { URL(fileURLWithPath: ProcessInfo.processInfo.environment["MESHKIT_HARDWARE_OUT"] ?? NSTemporaryDirectory()) }
 
+    nonisolated(unsafe) private static var opened: [SerialPort] = []
+
+    /// Every helper opens the port itself, so close whatever an earlier step left open before touching the board again.
+    static func closePorts() {
+        for p in opened { p.close() }
+        opened = []
+    }
+
+    static func openPort(_ path: String) throws -> SerialPort {
+        closePorts()
+        let port = try SerialPort(path: path)
+        opened.append(port)
+        return port
+    }
+
     static func repeater(_ path: String) async throws -> (RepeaterCLIClient, (version: String, board: String)) {
-        let transport = try SerialPort(path: path)
+        let transport = try openPort(path)
         try await Task.sleep(for: .milliseconds(2500))
         let cli = RepeaterCLIClient(transport: transport, logger: { print("  log:", $0) })
         await cli.start()
@@ -85,6 +100,7 @@ import Testing
     }
 
     static func flash(_ job: ESPFlashJob, path: String, backup: Bool = true) async throws {
+        closePorts()
         let flasher = ESPFlasher(portPath: path, job: job, options: ESPFlashOptions(baudRate: 460_800, useStub: true, backupFirst: backup),
                                  logger: { print("  esp:", $0) })
         print("STEPS", flasher.steps.map(\.title))

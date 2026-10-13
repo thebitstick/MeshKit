@@ -39,7 +39,7 @@ Scripts/build-app.sh                          # build/MeshKit.app, release, host
 UNIVERSAL=1 Scripts/build-app.sh              # arm64 + x86_64
 Scripts/package.sh                            # universal build, then build/release/*.zip, *.dmg, SHA256SUMS.txt
 swift Scripts/make-icon.swift Resources       # redraws AppIcon.icns and icon-readme.png
-MESHKIT_HARDWARE_PORT=/dev/cu.usbserial-0001 MESHKIT_HARDWARE_STEP=read swift test --filter HardwareTests  # real Heltec V3 repeater; steps: read, write, update, clean, restore:<file>, catalog, set:<key>=<value>
+MESHKIT_HARDWARE_PORT=/dev/cu.usbserial-0001 MESHKIT_HARDWARE_STEP=read swift test --filter HardwareTests  # real Heltec V3 repeater; steps: read, write, update, clean, restore:<file>, catalog, set:<key>=<value>; HardwareFirmwareTests steps: companion, room, meshtastic, alpha-debug
 swift run esp-sim --port 5555 --chip esp32s3  # simulated ESP for esptool: esptool --port socket://127.0.0.1:5555 chip_id
 swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic --host 127.0.0.1 --info
 ```
@@ -103,6 +103,9 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   reply; the serial console sets the clock with `time <epoch>` (`clock sync` returns `ERR: clock cannot go backwards`);
   `advert.interval` takes 0 (off) or 60-240; a freshly erased board takes several seconds to boot and prints
   `Repeater ID: …` before the console answers.
+- A board that was just flashed or reset takes several seconds to start answering (a clean install or first boot of
+  MeshCore companion needed about 6 s, Meshtastic about 15 s); the app retries the probe once after 4 s. A Meshtastic
+  node number can change when moving between releases (stable to alpha changed it on a Heltec V3).
 - Radio presets come from `api.meshcore.nz`, cached 24 hours, with a bundled snapshot as the offline fallback.
 
 ## Working agreements

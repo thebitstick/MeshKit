@@ -208,7 +208,14 @@ final class AppModel {
     private func open(transport: ByteTransport, title: String, portName: String, isDemo: Bool) async throws {
         disconnect()
         do {
-            try await probe(transport: transport, title: title, portName: portName, isDemo: isDemo)
+            do {
+                try await probe(transport: transport, title: title, portName: portName, isDemo: isDemo)
+            } catch ProbeError.noFirmware where !isDemo {
+                // A board that has just been flashed or reset can take several seconds to start answering.
+                log("No answer yet; giving the board a few more seconds to boot")
+                try await Task.sleep(for: .seconds(4))
+                try await probe(transport: transport, title: title, portName: portName, isDemo: isDemo)
+            }
         } catch {
             transport.close()
             throw error
