@@ -267,6 +267,15 @@ public struct MeshtasticPackage: Sendable {
         }
     }
 
+    /// The nRF52 DFU package (`firmware-<board>-<version>-ota.zip`), for installing over serial DFU.
+    public func dfuPackage() async throws -> Data {
+        guard board.isNRF52 else { throw MeshtasticError.unsupportedPlatform(board.architectureLabel) }
+        let meta = try? await metadata()
+        let file = name("-ota.zip")
+        if let meta { return try await verifiedFile(file, metadata: meta) }
+        return try await zip.read(file)
+    }
+
     public func uf2Image() async throws -> Data {
         guard board.isNRF52 else { throw MeshtasticError.unsupportedPlatform(board.architectureLabel) }
         let meta = try? await metadata()

@@ -32,6 +32,9 @@ import Testing
         let uf2 = try await catalog.package(for: wio, in: release).uf2Image()
         #expect(try UF2.inspect(uf2).isNRF52)
 
+        let dfu = try await NRF52DFUPackage.read(zip: try await catalog.package(for: wio, in: release).dfuPackage())
+        #expect(dfu.firmware.count > 100_000 && !dfu.initPacket.isEmpty)
+
         let erase = try await catalog.nrf52EraseImages(in: release)
         #expect(erase.images.keys.sorted() == ["6.1", "7.3"])
         for image in erase.images.values { #expect(try UF2.inspect(image).isNRF52) }

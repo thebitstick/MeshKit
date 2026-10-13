@@ -195,6 +195,11 @@ final class FirmwareModel {
         return base + (mtMode == .fresh ? ".factory.bin" : ".bin")
     }
 
+    func meshCoreSerialDFURequest(model: AppModel) -> FlashRequest? {
+        guard let group = selectedGroup else { return nil }
+        return .meshCoreSerialDFU(group, connection: group.build(for: effectiveConnection(for: group))?.connection, model: model)
+    }
+
     func meshtasticRequest() -> FlashRequest? {
         guard let board = mtSelectedBoard, let release = mtSelectedRelease else { return nil }
         return .meshtastic(board, release: release, mode: mtMode)

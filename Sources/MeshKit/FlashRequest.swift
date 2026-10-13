@@ -4,6 +4,7 @@ import SwiftUI
 enum FlashPayload {
     case uf2(Data, erase: NRF52EraseImages?)
     case bootloaderUpdate(Data)
+    case nrfSerialDFU(NRF52DFUPackage)
     case esp(ESPFlashJob)
 }
 
@@ -12,7 +13,7 @@ struct FlashContext {
 }
 
 struct FlashRequest: Identifiable {
-    enum Target { case uf2, esp }
+    enum Target { case uf2, esp, nrfSerial }
 
     let id = UUID()
     let title: String
@@ -88,6 +89,37 @@ struct FlashRequest: Identifiable {
                 : "The firmware is replaced and your settings are kept."
         }
         return request
+    }
+
+    // MARK: Serial DFU
+
+    private static let serialDFUWarning = "MeshKit restarts the board into serial DFU over USB, so no reset button or bootloader drive is needed, then sends the firmware package. It takes about a minute and keeps the board's settings. Keep the board plugged in until it finishes. There is no flash backup for nRF52 boards."
+
+    @MainActor
+    static func meshCoreSerialDFU(_ group: FirmwareBoardGroup, connection: MeshCoreConnection?, model: AppModel) -> FlashRequest? {
+        guard let build = group.build(for: connection), let artifact = build.artifacts.first(where: { $0.kind == .nrfDFUPackage }) else { return nil }
+        return FlashRequest(
+            title: "Install \(group.title) over serial DFU",
+            subtitle: "MeshCore \(build.role.title)\(connection.map { " · \($0.title)" } ?? "") · v\(build.version)",
+            target: .nrfSerial, warning: serialDFUWarning, details: [artifact.asset.name],
+            prepare: { _ in
+                guard let url = await model.firmware.download(artifact), let data = try? Data(contentsOf: url) else {
+                    throw FlashPrepareError(message: await model.firmware.error ?? "Download failed")
+                }
+                return .nrfSerialDFU(try await NRF52DFUPackage.read(zip: data))
+            })
+    }
+
+    static func meshtasticSerialDFU(_ board: MeshtasticBoard, release: MeshtasticRelease) -> FlashRequest {
+        let catalog = MeshtasticCatalog()
+        return FlashRequest(
+            title: "Install \(board.displayName) over serial DFU",
+            subtitle: "Meshtastic \(release.version) (\(release.channel.rawValue))",
+            target: .nrfSerial, prepareTitle: "Fetch the DFU package", warning: serialDFUWarning,
+            prepare: { _ in
+                let data = try await catalog.package(for: board, in: release).dfuPackage()
+                return .nrfSerialDFU(try await NRF52DFUPackage.read(zip: data))
+            })
     }
 
     // MARK: Bootloader

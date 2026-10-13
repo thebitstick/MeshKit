@@ -31,7 +31,7 @@ menu. The ESP32 flasher is written in Swift, so there's no `esptool`, Python or 
 | **Radio presets** | Community presets by region, plus your own | Meshtastic's modem presets |
 | **Back up** | Settings snapshots and full ESP32 flash images | Same |
 
-A connected Meshtastic nRF52 node can be sent into its bootloader from Device ▸ Restart into Bootloader, so no reset button is needed. On nRF52 boards the three-dot menu next to the board name can install the OTAFIX bootloader, which makes Bluetooth firmware updates more reliable. Any `.bin` or `.uf2` can be flashed from File ▸ Flash Image from File (⌘O) or by dropping it on the window. Demo devices
+A connected Meshtastic nRF52 node can be sent into its bootloader from Device ▸ Restart into Bootloader, so no reset button is needed. nRF52 boards can also be installed over USB serial DFU, with no reset button or bootloader drive (three-dot menu ▸ Install over USB serial). On nRF52 boards the three-dot menu next to the board name can install the OTAFIX bootloader, which makes Bluetooth firmware updates more reliable. Any `.bin` or `.uf2` can be flashed from File ▸ Flash Image from File (⌘O) or by dropping it on the window. Demo devices
 let you try everything without hardware.
 
 ## Install
@@ -52,7 +52,7 @@ swift test
 | Chip | Install | Status |
 |---|---|---|
 | ESP32, S2, **S3**, C2, C3, C6, H2 | Serial | Tested on a **Heltec V3**: Meshtastic (including clean install) and MeshCore companion and repeater, flashed and configured; MeshCore Update, Clean install and restoring a full flash backup |
-| nRF52840 (e.g. Wio Tracker L1) | UF2 drive | Tested on a **Wio Tracker L1**: MeshCore companion and Meshtastic installs, clean install (erase tool) and the OTAFIX bootloader update |
+| nRF52840 (e.g. Wio Tracker L1) | UF2 drive | Tested on a **Wio Tracker L1**: MeshCore companion and Meshtastic installs over the UF2 drive and over serial DFU, clean install (erase tool) and the OTAFIX bootloader update |
 | ESP32-P4, RP2040 / RP2350, STM32 | | Not supported |
 
 ## Safety

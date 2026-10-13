@@ -231,7 +231,8 @@ private struct MeshCoreBoardDetail: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text(group.title).font(.title2.weight(.semibold))
-                        BoardMenu(artifacts: build?.artifacts ?? [], dfuBoardID: build?.isUF2 == true ? OTAFix.boardID(meshCoreSlug: group.board) : nil, boardName: group.title)
+                        BoardMenu(artifacts: build?.artifacts ?? [], dfuBoardID: build?.isUF2 == true ? OTAFix.boardID(meshCoreSlug: group.board) : nil,
+                                 serialDFU: build?.isUF2 == true ? fw.meshCoreSerialDFURequest(model: model) : nil, boardName: group.title)
                     }
                     Text(subtitle(build)).foregroundStyle(.secondary)
                 }
@@ -301,7 +302,8 @@ private struct MeshtasticBoardDetail: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text(board.displayName).font(.title2.weight(.semibold))
-                        BoardMenu(dfuBoardID: board.isNRF52 ? OTAFix.boardID(meshtasticSlug: board.slug) : nil, boardName: board.displayName)
+                        BoardMenu(dfuBoardID: board.isNRF52 ? OTAFix.boardID(meshtasticSlug: board.slug) : nil,
+                                 serialDFU: board.isNRF52 ? FlashRequest.meshtasticSerialDFU(board, release: release) : nil, boardName: board.displayName)
                     }
                     HStack(spacing: 6) {
                         Text("Meshtastic v\(release.version)").foregroundStyle(.secondary)
@@ -343,10 +345,11 @@ struct BoardMenu: View {
     @Environment(AppModel.self) private var model
     var artifacts: [FirmwareArtifact] = []
     var dfuBoardID: String?
+    var serialDFU: FlashRequest?
     var boardName: String
 
     var body: some View {
-        if !artifacts.isEmpty || dfuBoardID != nil { menu }
+        if !artifacts.isEmpty || dfuBoardID != nil || serialDFU != nil { menu }
     }
 
     private var menu: some View {
@@ -364,6 +367,11 @@ struct BoardMenu: View {
                             Button("Download \(artifact.kind.rawValue) (\(size))") { Task { _ = await fw.download(artifact) } }
                         }
                     }
+                }
+            }
+            if let serialDFU {
+                Section("nRF52 install") {
+                    Button("Install over USB serial (no drive needed)") { model.pendingFlash = serialDFU }
                 }
             }
             if let id = dfuBoardID {

@@ -403,4 +403,57 @@ import Testing
         }
         print("ADMIN DFU DID NOT PRODUCE A DRIVE; ports", SerialDiscovery.list().map(\.path))
     }
+
+    static func meshCoreDFUZip(board: String) async throws -> (Data, String) {
+        let client = ReleaseClient()
+        let release = try #require(try await client.releases(for: .companion, limit: 1).first)
+        let build = try #require(ReleaseClient.builds(from: release, role: .companion).first { $0.board == board && $0.variant.contains("usb") })
+        let artifact = try #require(build.artifacts.first { $0.kind == .nrfDFUPackage })
+        return (try Data(contentsOf: try await client.download(artifact)), artifact.asset.name)
+    }
+
+    @Test func nrfSerialDFU() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-serial-dfu" else { return }
+        let (zip, name) = try await Self.meshCoreDFUZip(board: "WioTrackerL1")
+        let package = try await NRF52DFUPackage.read(zip: zip)
+        print("PACKAGE", name, "app", package.firmware.count, "init", package.initPacket.count)
+        let flasher = NRF52SerialDFUFlasher(portPath: path, package: package, logger: { print("  dfu:", $0) })
+        let started = Date()
+        try await flasher.run { id, state in
+            switch state {
+            case .done: print("  step \(id): done (\(Int(Date().timeIntervalSince(started)))s)")
+            case .failed(let m): print("  step \(id): FAILED \(m)")
+            case .running(let p?): print("  step \(id): \(Int(p * 100))%")
+            case .running: print("  step \(id): running")
+            default: break
+            }
+        }
+        HardwareTests.closePorts()
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(5))
+        let (client, info, me) = try await Self.companion(path)
+        print("AFTER DFU", info.model, info.semanticVersion, me.name, me.publicKeyHex.prefix(12))
+        await client.stop()
+        HardwareTests.closePorts()
+    }
+
+    @Test func nrfSerialDFUMeshtastic() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "nrf-serial-dfu-mt" else { return }
+        let catalog = MeshtasticCatalog()
+        let release = try #require(try await catalog.releases(limit: 30).first { $0.channel == .stable })
+        let board = try #require(try await catalog.boards(in: release).first { $0.slug == "seeed_wio_tracker_L1" })
+        let package = try await NRF52DFUPackage.read(zip: try await catalog.package(for: board, in: release).dfuPackage())
+        print("PACKAGE", release.version, "app", package.firmware.count)
+        try await NRF52SerialDFUFlasher(portPath: path, package: package, logger: { print("  dfu:", $0) }).run { id, state in
+            if case .done = state { print("  step \(id): done") }
+            if case .failed(let m) = state { print("  step \(id): FAILED \(m)") }
+        }
+        HardwareTests.closePorts()
+        try await Self.waitForPort(path)
+        try await Task.sleep(for: .seconds(8))
+        let (client, state) = try await Self.meshtastic(path)
+        print("MT AFTER DFU", state.nodeID, state.metadata?.firmwareVersion ?? "?", state.owner?.longName ?? "?")
+        await client.stop()
+        HardwareTests.closePorts()
+    }
 }

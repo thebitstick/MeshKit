@@ -20,6 +20,7 @@ struct FlashSheet: View {
     @State private var confirming = false
 
     private var isUF2: Bool { request.target == .uf2 }
+    private var isESP: Bool { request.target == .esp }
     private var volume: UF2Volume? { model.uf2Volumes.first { $0.id == volumeID } ?? (model.uf2Volumes.count == 1 ? model.uf2Volumes[0] : nil) }
     private var port: SerialPortInfo? { model.ports.first { $0.id == portID } ?? (model.ports.count == 1 ? model.ports[0] : nil) }
     private var address: UInt32? {
@@ -39,7 +40,7 @@ struct FlashSheet: View {
             }
 
             if steps.isEmpty {
-                if let warning = request.warning ?? (isUF2 ? nil : Self.defaultESPWarning) {
+                if let warning = request.warning ?? (isESP ? Self.defaultESPWarning : nil) {
                     Label(warning, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout).foregroundStyle(.orange)
                         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -73,7 +74,8 @@ struct FlashSheet: View {
             Button("Install", role: .destructive) { Task { await start() } }
         } message: {
             Text(isUF2 ? "The image is copied to the bootloader drive and the board reboots into it."
-                       : "The board's flash is rewritten. Don't unplug it until this finishes.")
+                       : isESP ? "The board's flash is rewritten. Don't unplug it until this finishes."
+                       : "The board restarts into serial DFU and the firmware is sent over USB. Don't unplug it until this finishes.")
         }
     }
 
@@ -101,20 +103,22 @@ struct FlashSheet: View {
                 if model.ports.isEmpty { Text("None found").tag(String?.none) }
                 ForEach(model.ports) { Text("\($0.displayName) — \($0.hint)").tag(Optional($0.id)) }
             }
-            if request.needsAddress {
+            if isESP, request.needsAddress {
                 LabeledContent("Write at address") { TextField("0x0", text: $addressText).textFieldStyle(.roundedBorder).frame(width: 120).font(.body.monospaced()) }
             }
-            if request.offersErase {
+            if isESP, request.offersErase {
                 Toggle("Erase the whole flash first", isOn: $eraseFirst)
                 Text(eraseFirst ? "Settings and data on the board are lost. Recommended for a first install."
                                 : "Only the image's own area is rewritten, so settings stored elsewhere on the board are kept.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Toggle("Back up the current flash first", isOn: $backupFirst)
-            Picker("Speed", selection: $baud) {
-                Text("115,200 (slowest, most compatible)").tag(115_200)
-                Text("460,800").tag(460_800)
-                Text("921,600 (fastest)").tag(921_600)
+            if isESP {
+                Toggle("Back up the current flash first", isOn: $backupFirst)
+                Picker("Speed", selection: $baud) {
+                    Text("115,200 (slowest, most compatible)").tag(115_200)
+                    Text("460,800").tag(460_800)
+                    Text("921,600 (fastest)").tag(921_600)
+                }
             }
         }
         if !request.details.isEmpty {
@@ -145,6 +149,11 @@ struct FlashSheet: View {
         case .bootloaderUpdate(let data):
             guard let volume else { failure = "No bootloader drive is mounted."; return }
             flasher = UF2VolumeFlasher(volume: volume, image: data, content: .bootloaderUpdate)
+        case .nrfSerialDFU(let package):
+            guard let port else { failure = "No serial port is selected."; return }
+            if model.session?.portName == port.displayName { model.disconnect(); try? await Task.sleep(for: .milliseconds(300)) }
+            let log: @Sendable (String) -> Void = { line in Task { @MainActor in model.log("dfu: \(line)") } }
+            flasher = NRF52SerialDFUFlasher(portPath: port.path, package: package, logger: log)
         case .esp(var job):
             guard let port else { failure = "No serial port is selected."; return }
             if request.offersErase { job.eraseAll = eraseFirst }
