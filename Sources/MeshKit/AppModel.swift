@@ -7,7 +7,7 @@ final class DeviceSession: Identifiable {
     enum Kind { case companion, repeater, meshtastic }
 
     let kind: Kind
-    let title: String
+    var title: String
     let portName: String
     let isDemo: Bool
     let transport: ByteTransport
@@ -22,6 +22,8 @@ final class DeviceSession: Identifiable {
     var repeaterVersion = ""
     var repeaterBoard = ""
     var nodeName = ""
+    var nodeLatitude: Double?
+    var nodeLongitude: Double?
 
     init(kind: Kind, title: String, portName: String, isDemo: Bool, transport: ByteTransport) {
         self.kind = kind; self.title = title; self.portName = portName; self.isDemo = isDemo; self.transport = transport
@@ -113,8 +115,7 @@ final class AppModel {
         firmware = FirmwareModel(vendor: vendor)
         refreshDevices()
         snapshots = SnapshotStore.list()
-        flashBackups = FlashBackupStore.list()
-        nrfBackups = NRF52BackupStore.list()
+        reloadFlashBackups()
         if vendor == .meshcore {
             userPresets = UserRadioPresetStore().list()
             Task { await loadRadioPresets() }
@@ -136,7 +137,14 @@ final class AppModel {
 
     /// Looks for serial ports and UF2 drives now. Reading mounted volumes can stall (a sleeping network share, say),
     /// so the repeating poll does it off the main thread; this immediate form is for launch and the Refresh command.
-    func refreshDevices() { apply(SerialDiscovery.list(), UF2Volumes.detect()) }
+    /// Reading a drive can stall (a sleeping share, or macOS waiting for the person to answer its permission question), so
+    /// nothing here may run on the main thread.
+    func refreshDevices() {
+        Task {
+            let found = await Task.detached(priority: .utility) { (SerialDiscovery.list(), UF2Volumes.detect()) }.value
+            apply(found.0, found.1)
+        }
+    }
 
     private func apply(_ newPorts: [SerialPortInfo], _ newVolumes: [UF2Volume]) {
         // Only publish real changes: assigning an equal value still invalidates every view (and the menus) watching it.
@@ -210,13 +218,19 @@ final class AppModel {
     private func open(transport: ByteTransport, title: String, portName: String, isDemo: Bool) async throws {
         disconnect()
         do {
-            do {
-                try await probe(transport: transport, title: title, portName: portName, isDemo: isDemo)
-            } catch ProbeError.noFirmware where !isDemo {
-                // A board that has just been flashed or reset can take several seconds to start answering.
-                log("No answer yet; giving the board a few more seconds to boot")
-                try await Task.sleep(for: .seconds(4))
-                try await probe(transport: transport, title: title, portName: portName, isDemo: isDemo)
+            // A board that has just been flashed or reset can take a while to start answering: a clean Meshtastic install
+            // formats its filesystem and makes keys on the first boot.
+            let waits: [Double] = isDemo ? [] : [4, 6, 8]
+            var attempt = 0
+            while true {
+                do {
+                    try await probe(transport: transport, title: title, portName: portName, isDemo: isDemo)
+                    break
+                } catch ProbeError.noFirmware where attempt < waits.count {
+                    log("No answer yet; giving the board \(Int(waits[attempt])) more seconds to boot")
+                    try await Task.sleep(for: .seconds(waits[attempt]))
+                    attempt += 1
+                }
             }
         } catch {
             transport.close()
@@ -263,8 +277,12 @@ final class AppModel {
         }
         var nodeName = ""
         if case .value(let name)? = try? await cli.read(CLICatalog.setting("name")!) { nodeName = name }
+        var latitude: Double?, longitude: Double?
+        if case .value(let v)? = try? await cli.read(CLICatalog.setting("lat")!) { latitude = Double(v) }
+        if case .value(let v)? = try? await cli.read(CLICatalog.setting("lon")!) { longitude = Double(v) }
         let s = DeviceSession(kind: .repeater, title: nodeName.isEmpty ? title : nodeName, portName: portName, isDemo: isDemo, transport: transport)
         s.cli = cli; s.repeaterVersion = ident.version; s.repeaterBoard = ident.board; s.nodeName = nodeName
+        s.nodeLatitude = latitude; s.nodeLongitude = longitude
         session = s
         log("Repeater CLI detected: \(ident.version)")
     }
@@ -274,9 +292,9 @@ final class AppModel {
         var errorDescription: String? {
             switch self {
             case .noFirmware(.meshcore):
-                "Nothing answered like MeshCore firmware. Check that the board runs MeshCore companion (USB), repeater or room-server firmware. A Meshtastic node needs the Meshtastic window."
+                "No MeshCore firmware answered. The board needs a USB companion, repeater or room server build. Meshtastic nodes open in the Meshtastic window."
             case .noFirmware(.meshtastic):
-                "Nothing answered like Meshtastic firmware. Check that the board runs Meshtastic with its serial API enabled. A MeshCore device needs the MeshCore window."
+                "No Meshtastic firmware answered. Check its serial API is on. MeshCore devices open in the MeshCore window."
             }
         }
     }
@@ -341,14 +359,14 @@ final class AppModel {
     /// Puts an nRF52 board into DFU mode whatever firmware it runs, and says what happened.
     func enterDFUMode(port: SerialPortInfo, wantsDrive: Bool = false) async {
         if session?.portName == port.displayName { disconnect(); try? await Task.sleep(for: .milliseconds(300)) }
-        await perform("Entering DFU mode") {
+        await perform("Restarting in update mode") {
             let log = logger
             switch try await NRF52DFUMode.enter(path: port.path, logger: { log("dfu: \($0)") }) {
-            case .uf2Drive: return "The node is restarting into its UF2 bootloader. Its drive appears in a few seconds."
+            case .uf2Drive: return "The node is restarting in update mode. Its drive appears in a few seconds."
             case .serialDFU:
                 return wantsDrive
-                    ? "This firmware restarts into serial DFU, which has no drive. Double-tap the board's reset button to get the drive instead."
-                    : "The board is in serial DFU mode. It has no drive: use Install over USB serial (the ⋯ menu next to the board name) to send firmware."
+                    ? "This firmware restarts in update mode without a drive. Double-tap reset to get the drive."
+                    : "In update mode (no drive). Use ⋯ ▸ Install over USB."
             }
         }
     }
@@ -357,7 +375,7 @@ final class AppModel {
     func enterDFUModeOnLikelyPort(wantsDrive: Bool = false) async {
         if let s = session, let port = ports.first(where: { $0.displayName == s.portName }) { await enterDFUMode(port: port, wantsDrive: wantsDrive); return }
         guard let only = dfuCandidatePorts.first, dfuCandidatePorts.count == 1 else {
-            show(Notice(text: dfuCandidatePorts.isEmpty ? "No nRF52 serial port found." : "More than one USB serial port: use the DFU button next to the right one in the device list.", isError: true))
+            show(Notice(text: dfuCandidatePorts.isEmpty ? "No nRF52 serial port found." : "More than one USB serial port: use Update mode next to the right one in the device list.", isError: true))
             return
         }
         await enterDFUMode(port: only, wantsDrive: wantsDrive)
@@ -440,7 +458,56 @@ final class AppModel {
     // MARK: Snapshots
 
     func reloadSnapshots() { snapshots = SnapshotStore.list() }
-    func reloadFlashBackups() { flashBackups = FlashBackupStore.list(); nrfBackups = NRF52BackupStore.list() }
+    /// Saves what the board in the bootloader drive is running, so it can be put back later.
+    func backUpFirmware(on volume: UF2Volume) async {
+        await perform("Backing up the firmware") {
+            let image = try await Task.detached(priority: .userInitiated) { try UF2Flasher.readCurrentImage(from: volume) }.value
+            let saved = try NRF52BackupStore.save(image, board: volume.model.isEmpty ? volume.boardID : volume.model)
+            reloadFlashBackups()
+            return "Saved \(NRF52BackupStore.describe(image) ?? saved.lastPathComponent)"
+        }
+    }
+
+    /// What the plugged-in board is, as best the app can tell: the model the firmware reports once connected, otherwise the
+    /// name the board announces over USB when exactly one board is plugged in.
+    var detectedBoard: String? {
+        if let session, !session.isDemo {
+            switch session.kind {
+            case .companion: if let m = session.deviceInfo?.model, !m.isEmpty { return m }
+            case .repeater: if !session.repeaterBoard.isEmpty { return session.repeaterBoard }
+            case .meshtastic: if let hw = session.meshtastic == nil ? nil : session.meshtasticState?.metadata?.hwModel { return prettyBoardName(String(describing: hw)) }
+            }
+        }
+        if let volume = uf2Volumes.first, uf2Volumes.count == 1, !volume.model.isEmpty { return volume.model }
+        let named = ports.compactMap(\.productName).filter { !USBNameAliases.isGeneric($0) }
+        return ports.count == 1 ? named.first.map(USBNameAliases.boardName(forUSBName:)) : nil
+    }
+
+    /// The connected node's name and location, for carrying over to the other firmware.
+    var currentIdentity: NodeIdentity? {
+        guard let session, !session.isDemo else { return nil }
+        switch session.kind {
+        case .companion:
+            guard let me = session.selfInfo else { return nil }
+            return NodeIdentity(name: me.name, latitude: me.latitude, longitude: me.longitude)
+        case .meshtastic:
+            guard let state = session.meshtasticState, let owner = state.owner else { return nil }
+            let position = state.nodes.first { $0.num == state.myNodeNum }?.position
+            return NodeIdentity(name: owner.longName, latitude: position.map { Double($0.latitudeI) / 1e7 }, longitude: position.map { Double($0.longitudeI) / 1e7 })
+        case .repeater:
+            return session.nodeName.isEmpty ? nil : NodeIdentity(name: session.nodeName, latitude: session.nodeLatitude, longitude: session.nodeLongitude)
+        }
+    }
+
+    /// Shows the saved images at once, then reads the ones not yet labelled in the background (an image is 2 to 8 MB).
+    func reloadFlashBackups() {
+        flashBackups = FlashBackupStore.list(readLabels: false)
+        nrfBackups = NRF52BackupStore.list(readLabels: false)
+        Task {
+            let labelled = await Task.detached(priority: .utility) { (FlashBackupStore.list(), NRF52BackupStore.list()) }.value
+            flashBackups = labelled.0; nrfBackups = labelled.1
+        }
+    }
 
     func backUp(_ session: DeviceSession, repeaterValues: [String: String]? = nil) async throws {
         var values: [String: String] = [:]

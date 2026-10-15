@@ -13,7 +13,14 @@ struct FirmwareView: View {
                     case .meshcore: MeshCoreControls()
                     case .meshtastic: MeshtasticControls()
                     }
-                    TextField("Filter boards", text: $fw.query).textFieldStyle(.roundedBorder)
+                    if let board = model.detectedBoard {
+                        DetectedBoardStrip(name: board, connected: model.session != nil, canShow: fw.bestBoard(matching: board) != nil) { fw.selectBoard(matching: board) }
+                    }
+                    if fw.usingSavedLists {
+                        Label("Offline: showing the lists saved earlier.", systemImage: "wifi.slash").font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    TextField("Filter boards", text: $fw.query).textFieldStyle(.roundedBorder).accessibilityLabel("Filter boards")
                 }
                 .padding(12)
                 Divider()
@@ -47,7 +54,13 @@ struct FirmwareView: View {
             .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task { await fw.load() }
+        .task {
+            await fw.load()
+            if !fw.hasSelection, fw.query.isEmpty, let board = model.detectedBoard { fw.selectBoard(matching: board) }
+        }
+        .onChange(of: model.detectedBoard) { _, board in
+            if !fw.hasSelection, fw.query.isEmpty, let board { fw.selectBoard(matching: board) }
+        }
         .onChange(of: fw.role) { _, _ in
             guard fw.vendor == .meshcore else { return }
             fw.selectedBoardID = nil
@@ -71,6 +84,29 @@ struct FirmwareView: View {
     }
 }
 
+/// "Your board" at the top of the list: what is plugged in, and a way to jump to its firmware.
+private struct DetectedBoardStrip: View {
+    let name: String
+    let connected: Bool
+    let canShow: Bool
+    let show: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "cpu").foregroundStyle(.tint).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(name).font(.callout.weight(.semibold)).lineLimit(1)
+                Text(connected ? "Connected" : "Plugged in").font(.caption).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            Spacer()
+            if canShow { Button("Show", action: show).accessibilityLabel("Show firmware for \(name)") } else { Text("Not in this list").font(.caption).foregroundStyle(.secondary) }
+        }
+        .padding(8)
+        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 // MARK: - Controls
 
 private struct MeshCoreControls: View {
@@ -85,7 +121,7 @@ private struct MeshCoreControls: View {
         HStack {
             if !fw.sources.isEmpty {
                 Picker("Source", selection: $fw.sourceID) {
-                    Text("MeshCore").tag(String?.none)
+                    Text("MeshCore (official)").tag(String?.none)
                     Divider()
                     ForEach(fw.sources) { Text($0.name).tag(Optional($0.id)) }
                 }
@@ -97,7 +133,7 @@ private struct MeshCoreControls: View {
                 }
             }
             .labelsHidden().frame(maxWidth: 220)
-            Button { Task { await fw.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+            Button { Task { await fw.refresh() } } label: { Label("Refresh release list", systemImage: "arrow.clockwise").labelStyle(.iconOnly) }
                 .help("Fetch the latest releases from GitHub")
             Spacer()
         }
@@ -119,7 +155,7 @@ private struct MeshtasticControls: View {
             }
             .labelsHidden().frame(maxWidth: 190)
             .onChange(of: fw.mtSelectedVersion) { _, _ in Task { await fw.reloadMeshtasticBoards() } }
-            Button { Task { await fw.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+            Button { Task { await fw.refresh() } } label: { Label("Refresh release list", systemImage: "arrow.clockwise").labelStyle(.iconOnly) }
                 .help("Fetch the latest releases from GitHub")
             Spacer()
         }
@@ -153,7 +189,7 @@ private struct MeshCoreBoardList: View {
 }
 
 private func chipLabel(_ group: FirmwareBoardGroup) -> String {
-    group.isESP32 ? "ESP32" : group.isUF2 ? "nRF52 · UF2" : ""
+    group.isESP32 ? "ESP32" : group.isUF2 ? "nRF52" : ""
 }
 
 struct ConnectionBadge: View {
@@ -184,7 +220,6 @@ private struct MeshtasticBoardList: View {
                         }
                         Spacer()
                         if board.supportLevel.map({ $0 > 1 }) ?? false { Pill(text: "Community") }
-                        if board.isNRF52 { Pill(text: "UF2") }
                     }
                     .padding(.vertical, 2)
                     .tag(board.slug)
@@ -199,6 +234,45 @@ private struct MeshtasticBoardList: View {
 }
 
 // MARK: - Details
+
+/// Update or Clean install as one compact control with a single line saying what the choice does.
+private struct InstallTypeControl: View {
+    @Binding var isClean: Bool
+    let updateNote: String
+    let cleanNote: String
+    var footnote: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Install type", systemImage: "arrow.triangle.2.circlepath").font(.headline)
+            Picker("Install type", selection: $isClean) {
+                Text("Update").tag(false)
+                Text("Clean install").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            Label(isClean ? cleanNote : updateNote, systemImage: isClean ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.callout).foregroundStyle(isClean ? Color.red : .secondary)
+            if let footnote { Text(footnote).font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+}
+
+/// USB, Bluetooth or Wi-Fi companion as one compact control with a line about the one chosen.
+private struct ConnectionControl: View {
+    let options: [MeshCoreConnection]
+    @Binding var selection: MeshCoreConnection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Connection", systemImage: "point.3.connected.trianglepath.dotted").font(.headline)
+            Picker("Connection", selection: $selection) {
+                ForEach(options) { Label($0.title, systemImage: $0.symbol).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            Text(selection.blurb).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
 
 struct OptionCard: View {
     let title: String
@@ -219,7 +293,7 @@ struct OptionCard: View {
                     Text(blurb).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(selected ? tint : destructive ? Color.red.opacity(0.5) : .secondary.opacity(0.5))
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(selected ? tint : destructive ? Color.red.opacity(0.5) : .secondary.opacity(0.5)).accessibilityHidden(true)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -239,53 +313,62 @@ private struct MeshCoreBoardDetail: View {
         let fw = model.firmware
         let connection = fw.effectiveConnection(for: group)
         let build = group.build(for: connection)
+        let overSerial = installsOverSerial(build)
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text(group.title).font(.title2.weight(.semibold))
                         BoardMenu(artifacts: build?.artifacts ?? [], dfuBoardID: build?.isUF2 == true ? OTAFix.boardID(meshCoreSlug: group.board) : nil,
-                                 serialDFU: build?.isUF2 == true ? fw.meshCoreSerialDFURequest(model: model) : nil, boardName: group.title)
+                                 serialDFU: build?.isUF2 == true ? fw.meshCoreSerialDFURequest(model: model) : nil,
+                                 convert: convertAction(for: build),
+                                 boardName: group.title)
                     }
                     Text(subtitle(build)).foregroundStyle(.secondary)
                 }
 
                 if group.connections.count > 1 {
-                    Card("Connection", symbol: "point.3.connected.trianglepath.dotted",
-                         footnote: "MeshCore builds one companion firmware per connection type. They aren't interchangeable, so pick the one you'll use.") {
-                        ForEach(group.connections) { c in
-                            OptionCard(title: c.title, symbol: c.symbol, blurb: c.blurb, selected: c == connection) { fw.preferredConnection = c }
-                        }
-                    }
+                    ConnectionControl(options: group.connections,
+                                      selection: Binding(get: { connection ?? .usb }, set: { fw.preferredConnection = $0 }))
                 } else if let only = group.connections.first {
-                    Label("This board only has \(only.title) companion firmware. \(only.blurb)", systemImage: only.symbol)
+                    Label(only == .ble ? "Bluetooth only: there is no USB build for this board. MeshKit can install it but not configure it; use the MeshCore phone app." : "Only \(only.title) firmware exists for this board.", systemImage: only.symbol)
                         .font(.callout).foregroundStyle(.secondary)
                 }
 
                 if let build, build.isESP32 || build.isUF2 {
-                    Card("Install type", symbol: "arrow.triangle.2.circlepath") {
-                        ForEach(MeshCoreInstallMode.allCases) { mode in
-                            OptionCard(title: mode.rawValue, symbol: mode == .update ? "arrow.up.circle" : "sparkles", blurb: mode.blurb, selected: fw.mcMode == mode, destructive: mode == .fresh) { fw.mcMode = mode }
-                        }
-                    }
-                }
-
-                Card("Install", symbol: "bolt.fill", footnote: installFootnote(build)) {
-                    HStack {
-                        Button { if let r = fw.meshCoreRequest(model: model) { model.pendingFlash = r } } label: {
-                            Label("Install", systemImage: "square.and.arrow.down")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .fixedSize()
-                        .disabled(build?.fullImage == nil)
-                        if let file = build?.fullImage?.asset.name { FileNameLabel(name: file) }
-                        Spacer(minLength: 0)
-                    }
+                    InstallTypeControl(isClean: Binding(get: { fw.mcMode == .fresh }, set: { fw.mcMode = $0 ? .fresh : .update }),
+                                       updateNote: MeshCoreInstallMode.update.blurb, cleanNote: MeshCoreInstallMode.fresh.blurb,
+                                       footnote: installFootnote(build, overSerial: overSerial))
                 }
             }
             .padding(24)
             .frame(maxWidth: 640, alignment: .leading)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            ActionBar(
+                install: { install() }, canInstall: build?.fullImage != nil,
+                convert: model.session == nil ? nil : convertAction(for: build),
+                fileName: (overSerial ? build?.artifacts.first { $0.kind == .nrfDFUPackage } : build?.fullImage)?.asset.name,
+                note: build?.fullImage == nil ? "No installable image is published for this board." : nil,
+                installTint: .blue)
+        }
+    }
+
+    /// A nRF52 board that is plugged in and running is installed over its serial port; the bootloader drive is the fallback.
+    private func installsOverSerial(_ build: FirmwareBuild?) -> Bool {
+        guard let build, build.isUF2, build.artifacts.contains(where: { $0.kind == .nrfDFUPackage }) else { return false }
+        return model.uf2Volumes.isEmpty && !model.dfuCandidatePorts.isEmpty
+    }
+
+    private func convertAction(for build: FirmwareBuild?) -> ConvertChoice? {
+        guard let build, build.isUF2 || build.isESP32, let slug = BoardPairs.meshtasticSlug(forMeshCoreBoard: group.board) else { return nil }
+        return ConvertChoice(title: "Convert to Meshtastic…", options: [ConvertOption(label: "Convert to Meshtastic…") {
+            FlashRequest.convertToMeshtastic(boardName: group.title, meshtasticSlug: slug, isESP32: build.isESP32, identity: $0)
+        }])
+    }
+
+    private func install() {
+        if let request = model.firmware.meshCoreInstallRequest(model: model) { model.pendingFlash = request }
     }
 
     private func subtitle(_ build: FirmwareBuild?) -> String {
@@ -293,18 +376,19 @@ private struct MeshCoreBoardDetail: View {
         return "\(model.firmware.source?.name ?? "MeshCore") \(model.firmware.role.title) · v\(build.version)"
     }
 
-    private func installFootnote(_ build: FirmwareBuild?) -> String {
+    private func installFootnote(_ build: FirmwareBuild?, overSerial: Bool) -> String {
         guard let build else { return "" }
         if let source = model.firmware.source {
-            return "Community build from \(source.repository), not from the MeshCore project. " + hardwareNote(build)
+            return "Community build from \(source.repository). " + hardwareNote(build, overSerial: overSerial)
         }
-        return hardwareNote(build)
+        return hardwareNote(build, overSerial: overSerial)
     }
 
-    private func hardwareNote(_ build: FirmwareBuild) -> String {
-        if build.isUF2 { return "Put the board in bootloader mode (double-tap reset) so its UF2 drive appears, then install. A clean install first runs Meshtastic's erase tool, so it needs a Meshtastic release to download it from." }
+    private func hardwareNote(_ build: FirmwareBuild, overSerial: Bool) -> String {
+        if overSerial { return "Installs over USB: no drive or reset button needed. If that fails you'll be offered the drive." }
+        if build.isUF2 { return "Double-tap reset so the board's drive appears, then install." }
         if build.isESP32 {
-            return "Only the full image is downloaded. An update writes just its boot-selection data and application; a clean install writes all of it at 0x0 after erasing the chip."
+            return "Update writes the app only. Clean install erases the chip and writes everything."
         }
         return ""
     }
@@ -315,6 +399,22 @@ private struct MeshtasticBoardDetail: View {
     let board: MeshtasticBoard
     let release: MeshtasticRelease
 
+    /// An update to an nRF52 board that is plugged in and running goes over its serial port; everything else needs the UF2 drive.
+    private var installsOverSerial: Bool {
+        board.isNRF52 && model.uf2Volumes.isEmpty && !model.dfuCandidatePorts.isEmpty
+    }
+
+    /// A board can become any of MeshCore's three roles; the choice is made when converting.
+    private var meshCoreConvert: ConvertChoice? {
+        BoardPairs.meshCoreSlug(forMeshtasticBoard: board.slug).map { slug in
+            ConvertChoice(title: "Convert to MeshCore", options: [
+                ConvertOption(label: "Companion (USB)…") { .convertToMeshCore(boardName: board.displayName, meshCoreSlug: slug, role: .companion, isESP32: board.isESP32, identity: $0) },
+                ConvertOption(label: "Repeater…") { .convertToMeshCore(boardName: board.displayName, meshCoreSlug: slug, role: .repeater, isESP32: board.isESP32, identity: $0) },
+                ConvertOption(label: "Room server…") { .convertToMeshCore(boardName: board.displayName, meshCoreSlug: slug, role: .roomServer, isESP32: board.isESP32, identity: $0) },
+            ])
+        }
+    }
+
     var body: some View {
         @Bindable var fw = model.firmware
         ScrollView {
@@ -323,7 +423,9 @@ private struct MeshtasticBoardDetail: View {
                     HStack(spacing: 8) {
                         Text(board.displayName).font(.title2.weight(.semibold))
                         BoardMenu(dfuBoardID: board.isNRF52 ? OTAFix.boardID(meshtasticSlug: board.slug) : nil,
-                                 serialDFU: board.isNRF52 ? FlashRequest.meshtasticSerialDFU(board, release: release) : nil, boardName: board.displayName)
+                                 serialDFU: board.isNRF52 ? FlashRequest.meshtasticSerialDFU(board, release: release, clean: fw.mtMode == .fresh) : nil,
+                                 convert: board.isNRF52 || board.isESP32 ? meshCoreConvert : nil,
+                                 boardName: board.displayName)
                     }
                     HStack(spacing: 6) {
                         Text("Meshtastic v\(release.version)").foregroundStyle(.secondary)
@@ -334,28 +436,81 @@ private struct MeshtasticBoardDetail: View {
                     }
                 }
 
-                Card("Install type", symbol: "arrow.triangle.2.circlepath",
-                     footnote: board.isNRF52 ? "nRF52 boards install from a UF2 file: double-tap reset so the board's drive appears, then install." : nil) {
-                    ForEach(MeshtasticInstallMode.allCases) { mode in
-                        OptionCard(title: mode.rawValue, symbol: mode == .update ? "arrow.up.circle" : "sparkles", blurb: mode.blurb, selected: fw.mtMode == mode, destructive: mode == .fresh) { fw.mtMode = mode }
-                    }
-                }
-
-                Card("Install", symbol: "bolt.fill", footnote: "Only this board's files are downloaded, not the whole multi-board package, and each is checked against the checksum published with the release.") {
-                    HStack {
-                        Button { if let r = fw.meshtasticRequest() { model.pendingFlash = r } } label: {
-                            Label("Install", systemImage: "square.and.arrow.down")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .fixedSize()
-                        FileNameLabel(name: fw.meshtasticFileName(board: board, release: release))
-                        Spacer(minLength: 0)
-                    }
-                }
+                InstallTypeControl(isClean: Binding(get: { fw.mtMode == .fresh }, set: { fw.mtMode = $0 ? .fresh : .update }),
+                                   updateNote: MeshtasticInstallMode.update.blurb, cleanNote: MeshtasticInstallMode.fresh.blurb,
+                                   footnote: board.isNRF52 ? (installsOverSerial ? "Installs over USB: no drive or reset button needed." : "Plug the board in and MeshKit installs over USB. Otherwise double-tap reset for its drive.") : nil)
             }
             .padding(24)
             .frame(maxWidth: 640, alignment: .leading)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            ActionBar(
+                install: { model.pendingFlash = fw.meshtasticInstallRequest(model: model) }, canInstall: true,
+                convert: (board.isNRF52 || board.isESP32) && model.session != nil ? meshCoreConvert : nil,
+                fileName: installsOverSerial ? fw.meshtasticFileName(board: board, release: release).replacingOccurrences(of: ".uf2", with: "-ota.zip") : fw.meshtasticFileName(board: board, release: release),
+                note: nil, installTint: .green)
+        }
+    }
+}
+
+struct ConvertOption: Identifiable {
+    let label: String
+    let make: (NodeIdentity?) -> FlashRequest
+    var id: String { label }
+}
+
+/// What a Convert button offers: one request, or a menu when the board can become several things.
+struct ConvertChoice {
+    let title: String
+    let options: [ConvertOption]
+}
+
+/// The install button, any convert button and the exact file, kept at the bottom of the pane so they never scroll away
+/// or get cut off.
+private struct ActionBar: View {
+    @Environment(AppModel.self) private var model
+    let install: () -> Void
+    let canInstall: Bool
+    let convert: ConvertChoice?
+    let fileName: String?
+    let note: String?
+    /// The colour of the firmware being installed.
+    let installTint: Color
+
+    private func convertLabel(_ title: String) -> some View {
+        Label(title, systemImage: "arrow.left.arrow.right")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let note { Label(note, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
+            if let fileName {
+                Label { FileNameLabel(name: fileName) } icon: { Image(systemName: "doc").foregroundStyle(.secondary) }.font(.caption)
+            }
+            HStack {
+                Button(action: install) { Label("Install", systemImage: "square.and.arrow.down") }
+                    .buttonStyle(.borderedProminent).tint(installTint).disabled(!canInstall)
+                if let convert {
+                    if let only = convert.options.first, convert.options.count == 1 {
+                        Button { model.pendingFlash = only.make(model.currentIdentity) } label: { convertLabel(convert.title) }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Menu {
+                            ForEach(convert.options) { option in
+                                Button(option.label) { model.pendingFlash = option.make(model.currentIdentity) }
+                            }
+                        } label: { convertLabel(convert.title) }
+                        .menuStyle(.button).buttonStyle(.bordered).menuIndicator(.visible).fixedSize()
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 }
 
@@ -366,10 +521,12 @@ struct BoardMenu: View {
     var artifacts: [FirmwareArtifact] = []
     var dfuBoardID: String?
     var serialDFU: FlashRequest?
+    /// "Convert to Meshtastic…" and the request it opens, given the connected node's name and location (if any).
+    var convert: ConvertChoice?
     var boardName: String
 
     var body: some View {
-        if !artifacts.isEmpty || dfuBoardID != nil || serialDFU != nil { menu }
+        if !artifacts.isEmpty || dfuBoardID != nil || serialDFU != nil || convert != nil { menu }
     }
 
     private var menu: some View {
@@ -390,8 +547,15 @@ struct BoardMenu: View {
                 }
             }
             if let serialDFU {
-                Section("nRF52 install") {
-                    Button("Install over USB serial (no drive needed)") { model.pendingFlash = serialDFU }
+                Section("Install") {
+                    Button("Install over USB (no drive needed)") { model.pendingFlash = serialDFU }
+                }
+            }
+            if let convert {
+                Section("Switch firmware") {
+                    ForEach(convert.options) { option in
+                        Button(convert.options.count == 1 ? option.label : "\(convert.title) as \(option.label.lowercased())") { model.pendingFlash = option.make(model.currentIdentity) }
+                    }
                 }
             }
             if let id = dfuBoardID {
@@ -410,7 +574,7 @@ struct BoardMenu: View {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(systemName: "ellipsis.circle").accessibilityLabel("More actions for \(boardName)")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

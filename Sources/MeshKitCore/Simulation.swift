@@ -7,6 +7,8 @@ public final class SimulatedCompanionTransport: ByteTransport, @unchecked Sendab
     private var me: SelfInfo
     private var contacts: [Contact]
 
+    public var currentSelf: SelfInfo { lock.withLock { me } }
+
     public init(name: String = "Demo Companion") {
         me = SelfInfo(advType: .chat, txPowerDBm: 14, maxTxPowerDBm: 22,
                       publicKey: (0..<32).map { UInt8(($0 * 37 + 11) & 0xFF) },
@@ -57,6 +59,11 @@ public final class SimulatedCompanionTransport: ByteTransport, @unchecked Sendab
         case 12:
             guard let p = try? r.u8() else { return err }
             me.txPowerDBm = Int(p); return ok
+        case 38:
+            guard let manual = try? r.u8(), let telemetry = try? r.u8(), let policy = try? r.u8() else { return err }
+            me.manualAddContacts = manual != 0; me.telemetryModes = telemetry; me.advertLocationShared = policy != 0
+            if let multi = try? r.u8() { me.multiAcks = multi != 0 }
+            return ok
         case 14:
             guard let lat = try? r.i32(), let lon = try? r.i32() else { return err }
             me.latitude = Double(lat) / 1e6; me.longitude = Double(lon) / 1e6; return ok

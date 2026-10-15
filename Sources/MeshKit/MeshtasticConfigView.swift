@@ -49,32 +49,35 @@ struct MeshtasticConfigView: View {
             }
 
             Section("Owner") {
-                TextField("Long name", text: $draft.longName)
-                TextField("Short name (4 characters)", text: $draft.shortName)
-                    .onChange(of: draft.shortName) { _, new in if new.count > 4 { draft.shortName = String(new.prefix(4)) } }
+                LimitedNameField(title: "Long name", text: $draft.longName, limit: NameLimits.meshtasticLong)
+                LimitedNameField(title: "Short name", text: $draft.shortName, limit: NameLimits.meshtasticShort)
             }
 
             Section {
                 Picker("Region", selection: $draft.region) {
                     ForEach(Config.LoRaConfig.RegionCode.allCases, id: \.self) { Text(MeshtasticLabels.region($0)).tag($0) }
                 }
+                .accessibilityLabel("Region")
                 Picker("Modem preset", selection: $draft.preset) {
                     ForEach(Config.LoRaConfig.ModemPreset.allCases, id: \.self) { Text(MeshtasticLabels.modemPreset($0)).tag($0) }
                 }
-                Stepper("Hop limit: \(draft.hopLimit)", value: $draft.hopLimit, in: 0...7)
-                Toggle("Transmit enabled", isOn: $draft.txEnabled)
-                Stepper(draft.txPower == 0 ? "TX power: default" : "TX power: \(draft.txPower) dBm", value: $draft.txPower, in: 0...30)
+                .accessibilityLabel("Modem preset")
+                StepperRow(title: "Hop limit", valueText: "\(draft.hopLimit)", value: $draft.hopLimit, range: 0...7)
+                Toggle("Transmit enabled", isOn: $draft.txEnabled).accessibilityLabel("Transmit enabled")
+                StepperRow(title: "TX power", valueText: draft.txPower == 0 ? "Default" : "\(draft.txPower) dBm", value: $draft.txPower, range: 0...30)
             } header: {
                 Text("LoRa radio")
             } footer: {
-                Text(draft.region == .unset ? "Choose your region before the radio will transmit. Using the wrong region may be illegal where you are."
+                Text(draft.region == .unset ? "Choose your region before the radio will transmit. The wrong region may be illegal where you are."
                                             : "Nodes need the same region and preset to hear each other. The node reboots to apply radio changes.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Section("Device") {
                 Picker("Role", selection: $draft.role) {
                     ForEach(Config.DeviceConfig.Role.allCases, id: \.self) { Text(MeshtasticLabels.role($0)).tag($0) }
                 }
+                .accessibilityLabel("Role")
             }
 
             if let channels = state?.channels.filter({ $0.role != .disabled }), !channels.isEmpty {
@@ -89,7 +92,7 @@ struct MeshtasticConfigView: View {
                             }
                         }
                     }
-                } header: { Text("Channels") } footer: { Text("Keys are never shown here. Editing channels isn't supported yet.") }
+                } header: { Text("Channels") } footer: { Text("Keys are never shown here. Editing channels isn't supported yet.").frame(maxWidth: .infinity, alignment: .leading) }
             }
 
             if let nodes = state?.nodes, !nodes.isEmpty {
@@ -139,7 +142,7 @@ struct MeshtasticConfigView: View {
             Button("Read from node") { Task { await reload() } }
             Button("Back up settings") { Task { await backUp() } }
             Button("Revert") { draft = original }.disabled(draft == original)
-            Button("Apply \(changeCount) change\(changeCount == 1 ? "" : "s")") { Task { await apply() } }
+            Button(changeCount == 0 ? "Apply" : "Apply \(changeCount) change\(changeCount == 1 ? "" : "s")") { Task { await apply() } }
                 .buttonStyle(.borderedProminent).disabled(changeCount == 0 || isManaged)
         }
         .padding(12)
@@ -173,7 +176,10 @@ struct MeshtasticConfigView: View {
             try await client.apply(edit)
             // The node may reboot to apply radio changes; give it a moment, then read back what it settled on.
             try? await Task.sleep(for: .milliseconds(changesRadio ? 2500 : 600))
-            if let fresh = try? await client.connect() { session.meshtastic != nil ? (session.meshtasticState = fresh) : () }
+            if let fresh = try? await client.connect() {
+                session.meshtasticState = fresh
+                if let name = fresh.owner?.longName, !name.isEmpty { session.title = name }
+            }
             loadDraft()
             message = .init(text: changesRadio ? "Applied. The node may reboot to use the new radio settings." : "Applied", isError: false)
         } catch {

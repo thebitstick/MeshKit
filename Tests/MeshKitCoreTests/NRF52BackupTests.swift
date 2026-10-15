@@ -25,6 +25,40 @@ import Testing
         #expect(abs(list[1].date.timeIntervalSince(older)) < 1)
     }
 
+    private func image(_ pages: [(address: UInt32, text: String)]) -> Data {
+        var out = Data()
+        for (i, page) in pages.enumerated() {
+            var b: [UInt8] = []
+            b.appendLE(UF2.magicStart0); b.appendLE(UF2.magicStart1); b.appendLE(UF2.familyFlag)
+            b.appendLE(page.address); b.appendLE(UInt32(256))
+            b.appendLE(UInt32(i)); b.appendLE(UInt32(pages.count)); b.appendLE(UInt32(0x2886_1667))
+            var payload = [UInt8](page.text.utf8)
+            payload += [UInt8](repeating: 0, count: 476 - payload.count)
+            b += payload
+            b.appendLE(UF2.magicEnd)
+            out.append(contentsOf: b)
+        }
+        return out
+    }
+
+    @Test func namesTheFirmwareFromItsVersionString() {
+        #expect(NRF52BackupStore.describe(image([(0x27000, "\0\0 junk"), (0xBA300, "\0 2.7.26.54e0d8d \0")])) == "Meshtastic 2.7.26 (54e0d8d)")
+        #expect(NRF52BackupStore.describe(image([(0x82000, "xx\0v1.17.1-d929643\0yy")])) == "MeshCore v1.17.1 (d929643)")
+        #expect(NRF52BackupStore.describe(image([(0x27000, "nothing here")])) == nil)
+    }
+
+    @Test func aBoardChangedToASmallerFirmwareReportsTheLeftovers() {
+        let hybrid = image([(0x80800, "\0v1.17.1-d929643\0"), (0xBA300, "\02.7.26.54e0d8d\0")])
+        #expect(NRF52BackupStore.describe(hybrid) == "MeshCore v1.17.1 (d929643), with leftovers of Meshtastic 2.7.26 (54e0d8d)")
+    }
+
+    @Test func listShowsWhatEachBackupHolds() throws {
+        let dir = try temporary()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try NRF52BackupStore.save(image([(0x27000, "\02.7.26.54e0d8d\0")]), board: "Seeed TRACKER L1", in: dir)
+        #expect(NRF52BackupStore.list(in: dir).first?.firmware == "Meshtastic 2.7.26 (54e0d8d)")
+    }
+
     @Test func refusesToSaveSomethingThatIsNotAUF2() throws {
         let dir = try temporary()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -68,5 +102,24 @@ import Testing
         #expect(restore.steps.map(\.id) == ["verify", "write", "reboot"])
         try await restore.run { _, _ in }
         #expect(try Data(contentsOf: dir.appendingPathComponent("NEW.UF2")) == image)
+    }
+}
+
+@Suite struct FlashImageLabelTests {
+    private func image(_ pieces: [(offset: Int, text: String)], size: Int = 4096) -> Data {
+        var bytes = [UInt8](repeating: 0xFF, count: size)
+        for piece in pieces { bytes.replaceSubrange(piece.offset..<piece.offset + piece.text.utf8.count, with: Array(piece.text.utf8)) }
+        return Data(bytes)
+    }
+
+    @Test func namesTheFirmwareInAFullFlashImage() {
+        #expect(FlashBackupStore.describe(image([(0x100, "\0v1.17.1-d929643\0")])) == "MeshCore v1.17.1 (d929643)")
+        #expect(FlashBackupStore.describe(image([(0x200, "\0 2.7.26.54e0d8d\0")])) == "Meshtastic 2.7.26 (54e0d8d)")
+        #expect(FlashBackupStore.describe(image([])) == nil)
+    }
+
+    @Test func aLaterOtherFirmwareIsReportedAsLeftover() {
+        let label = FlashBackupStore.describe(image([(0x100, " v1.17.1-d929643 "), (0x800, " 2.7.26.54e0d8d ")]))
+        #expect(label == "MeshCore v1.17.1 (d929643), with leftovers of Meshtastic 2.7.26 (54e0d8d)")
     }
 }

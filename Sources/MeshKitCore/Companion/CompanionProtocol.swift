@@ -262,6 +262,12 @@ public enum CompanionRequest {
     /// UNVERIFIED: single dBm byte.
     public static func setTxPower(_ dBm: Int) -> [UInt8] { [12, UInt8(clamping: dBm)] }
 
+    /// CMD_SET_OTHER_PARAMS (38), checked against MeshCore's `MyMesh.cpp`: manual-add flag, packed telemetry modes, advert
+    /// location policy (0 none, 1 share) and multi-acks. All four are sent, so the ones not being changed are repeated.
+    public static func setOtherParams(manualAddContacts: Bool, telemetryModes: UInt8, shareLocation: Bool, multiAcks: Bool) -> [UInt8] {
+        [38, manualAddContacts ? 1 : 0, telemetryModes, shareLocation ? 1 : 0, multiAcks ? 1 : 0]
+    }
+
     public static func setAdvertLatLon(latitude: Double, longitude: Double) -> [UInt8] {
         var b: [UInt8] = [14]
         b.appendLE(Int32((latitude * 1e6).rounded()))

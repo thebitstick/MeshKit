@@ -4,6 +4,9 @@
 #   Scripts/package.sh                       # universal (arm64 + x86_64), ad-hoc signed
 #   UNIVERSAL=0 Scripts/package.sh           # this Mac's architecture only (faster)
 #
+# Release notes for Sparkle's update window and the GitHub release: write them once in a Markdown file and pass it in.
+#   NOTES_FILE=notes.md Scripts/package.sh       # copied into the appcast; use the same file for `gh release create -F`
+#
 # To sign and notarise (needs an Apple Developer account; not exercised by the project's tests):
 #   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 #   NOTARY_PROFILE=meshkit-notary \          # created once with: xcrun notarytool store-credentials meshkit-notary
@@ -47,7 +50,12 @@ rm -rf "$CHECK"
 # rip.bitstick.MeshKit). The app reads it from the latest release, so the file is uploaded with every release.
 SPARKLE_BIN=$(swift build -c release --show-bin-path 2>/dev/null | sed 's#/\.build/.*#/.build#')/artifacts/sparkle/Sparkle/bin
 APPCAST=$(mktemp -d); cp "$DIST/$NAME.zip" "$APPCAST/"
-"$SPARKLE_BIN/generate_appcast" --account rip.bitstick.MeshKit \
+NOTES_FLAG=()
+if [ -n "${NOTES_FILE:-}" ]; then
+  [ -f "$NOTES_FILE" ] || { echo "NOTES_FILE not found: $NOTES_FILE" >&2; exit 1; }
+  cp "$NOTES_FILE" "$APPCAST/$NAME.md"; NOTES_FLAG=(--embed-release-notes)
+fi
+"$SPARKLE_BIN/generate_appcast" --account rip.bitstick.MeshKit ${NOTES_FLAG[@]+"${NOTES_FLAG[@]}"} \
   --download-url-prefix "https://github.com/thebitstick/MeshKit/releases/download/v$VERSION/" \
   --link "https://github.com/thebitstick/MeshKit" "$APPCAST" >&2
 cp "$APPCAST/appcast.xml" "$DIST/appcast.xml"; rm -rf "$APPCAST"

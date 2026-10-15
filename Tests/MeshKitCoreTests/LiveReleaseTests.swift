@@ -38,6 +38,9 @@ import Testing
         let erase = try await catalog.nrf52EraseImages(in: release)
         #expect(erase.images.keys.sorted() == ["6.1", "7.3"])
         for image in erase.images.values { #expect(try UF2.inspect(image).isNRF52) }
+        #expect(dfu.softDevices == [0x123])
+        let tool = try NRF52DFUPackage.eraseTool(for: dfu, from: erase)
+        #expect(tool.firmware.count > 50_000 && tool.softDevices == [0x123])
     }
 
     @Test(arguments: MeshCoreRole.allCases)

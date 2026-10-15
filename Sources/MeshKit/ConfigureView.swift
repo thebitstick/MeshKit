@@ -32,6 +32,7 @@ struct CompanionConfigView: View {
     struct Draft: Equatable {
         var name = "", lat = "", lon = "", freq = "", bw = ""
         var sf = 7, cr = 5, tx = 14
+        var shareLocation = false
     }
 
     @State private var draft = Draft()
@@ -50,14 +51,24 @@ struct CompanionConfigView: View {
                     LabeledContent("Model", value: info.model)
                     LabeledContent("Firmware", value: "\(info.semanticVersion) (\(info.buildDate))")
                     LabeledContent("Capacity", value: "\(info.maxContacts) contacts · \(info.maxChannels) channels")
-                    LabeledContent("Public key") { Text(me.publicKeyHex).font(.caption.monospaced()).textSelection(.enabled) }
+                    LabeledContent("Public key") { PublicKeyView(hex: me.publicKeyHex) }
                 }
             }
 
             Section("Identity") {
-                TextField("Node name", text: $draft.name)
-                TextField("Latitude", text: $draft.lat)
-                TextField("Longitude", text: $draft.lon)
+                LimitedNameField(title: "Node name", text: $draft.name,
+                                 limit: NameLimits.meshCore(sharingLocation: draft.shareLocation),
+                                 warnAbove: draft.shareLocation ? nil : NameLimits.meshCoreAdvertised,
+                                 warning: "31 bytes can be saved, but only 23 are shown to other nodes if the location is shared.")
+                TextField("Latitude", text: $draft.lat).textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
+                TextField("Longitude", text: $draft.lon).textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
+                Toggle(isOn: $draft.shareLocation) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Share location in adverts")
+                        Text(draft.shareLocation ? "Other nodes see where this node is. Names are shown up to 23 bytes." : "The location stays on the node and isn't advertised.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section {
@@ -69,15 +80,15 @@ struct CompanionConfigView: View {
                         PresetMatchNote(values: draftRadio)
                     }
                 }
-                TextField("Frequency (MHz)", text: $draft.freq)
-                TextField("Bandwidth (kHz)", text: $draft.bw)
-                Stepper("Spreading factor: \(draft.sf)", value: $draft.sf, in: 5...12)
-                Stepper("Coding rate: 4/\(draft.cr)", value: $draft.cr, in: 5...8)
-                Stepper("TX power: \(draft.tx) dBm", value: $draft.tx, in: 1...(session.selfInfo?.maxTxPowerDBm ?? 22))
+                TextField("Frequency (MHz)", text: $draft.freq).textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
+                TextField("Bandwidth (kHz)", text: $draft.bw).textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
+                StepperRow(title: "Spreading factor", valueText: "\(draft.sf)", value: $draft.sf, range: 5...12)
+                StepperRow(title: "Coding rate", valueText: "4/\(draft.cr)", value: $draft.cr, range: 5...8)
+                StepperRow(title: "TX power", valueText: "\(draft.tx) dBm", value: $draft.tx, range: 1...(session.selfInfo?.maxTxPowerDBm ?? 22))
             } header: {
                 Text("Radio")
             } footer: {
-                Text("All nodes on a network must share frequency, bandwidth, spreading factor and coding rate.")
+                Text("All nodes on a network must share frequency, bandwidth, spreading factor and coding rate.").frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Section("Actions") {
@@ -128,6 +139,7 @@ struct CompanionConfigView: View {
         do {
             let (info, me) = try await c.handshake()
             session.deviceInfo = info; session.selfInfo = me
+            if !me.name.isEmpty { session.title = me.name }
             loadDraft()
             message = .init(text: "Read settings from the device", isError: false)
         } catch { message = .init(text: error.localizedDescription, isError: true) }
@@ -146,6 +158,7 @@ struct CompanionConfigView: View {
         if draft.lat != original.lat || draft.lon != original.lon { n += 1 }
         if (draft.freq, draft.bw, draft.sf, draft.cr) != (original.freq, original.bw, original.sf, original.cr) { n += 1 }
         if draft.tx != original.tx { n += 1 }
+        if draft.shareLocation != original.shareLocation { n += 1 }
         return n
     }
 
@@ -159,7 +172,7 @@ struct CompanionConfigView: View {
             if busy { ProgressView().controlSize(.small) }
             Button("Back up settings") { backUp() }
             Button("Revert") { draft = original }.disabled(changeCount == 0)
-            Button("Apply \(changeCount) change\(changeCount == 1 ? "" : "s")") { Task { await apply() } }
+            Button(changeCount == 0 ? "Apply" : "Apply \(changeCount) change\(changeCount == 1 ? "" : "s")") { Task { await apply() } }
                 .buttonStyle(.borderedProminent).disabled(changeCount == 0)
         }
         .padding(12)
@@ -168,9 +181,9 @@ struct CompanionConfigView: View {
 
     private func loadDraft() {
         guard let me = session.selfInfo else { return }
-        draft = Draft(name: me.name, lat: String(me.latitude), lon: String(me.longitude),
+        draft = Draft(name: me.name, lat: String(format: "%.5f", me.latitude), lon: String(format: "%.5f", me.longitude),
                       freq: String(me.frequencyMHz), bw: String(me.bandwidthKHz),
-                      sf: me.spreadingFactor, cr: me.codingRate, tx: me.txPowerDBm)
+                      sf: me.spreadingFactor, cr: me.codingRate, tx: me.txPowerDBm, shareLocation: me.advertLocationShared)
         original = draft
     }
 
@@ -202,8 +215,12 @@ struct CompanionConfigView: View {
                 try await c.setRadio(frequencyMHz: f, bandwidthKHz: bw, spreadingFactor: draft.sf, codingRate: draft.cr)
             }
             if draft.tx != original.tx { try await c.setTxPower(draft.tx) }
+            if draft.shareLocation != original.shareLocation, let current = session.selfInfo {
+                try await c.setLocationSharing(draft.shareLocation, current: current)
+            }
             let (info, me) = try await c.handshake()
             session.deviceInfo = info; session.selfInfo = me
+            if !me.name.isEmpty { session.title = me.name }
             loadDraft()
             message = .init(text: "Settings applied", isError: false)
         } catch {
@@ -297,7 +314,9 @@ struct RepeaterConfigView: View {
                     ForEach(CLICatalog.all.filter { $0.group == group }) { setting in
                         SettingRow(setting: setting, text: binding(for: setting),
                                    isChanged: changed.contains(setting.id), unsupported: unsupported.contains(setting.id),
-                                   loaded: loaded, onPreset: { applyPreset($0) })
+                                   loaded: loaded,
+                                   nameLimit: NameLimits.meshCoreRepeater,
+                                   onPreset: { applyPreset($0) })
                     }
                 }
             }
@@ -330,7 +349,7 @@ struct RepeaterConfigView: View {
             Button("Read from device") { Task { await readAll() } }
             Button("Back up settings") { Task { await backUp() } }.disabled(!loaded)
             Button("Revert") { edits = [:] }.disabled(changed.isEmpty)
-            Button("Apply \(changed.count) change\(changed.count == 1 ? "" : "s")") { Task { await apply() } }
+            Button(changed.isEmpty ? "Apply" : "Apply \(changed.count) change\(changed.count == 1 ? "" : "s")") { Task { await apply() } }
                 .buttonStyle(.borderedProminent).disabled(changed.isEmpty)
         }
         .padding(12)
@@ -370,6 +389,7 @@ struct RepeaterConfigView: View {
                 let reply = try await cli.write(setting, value: value)
                 if reply.lowercased().hasPrefix("err") { throw FormError("\(setting.label): \(reply)") }
                 values[id] = value
+                if id == "name", !value.isEmpty { session.title = value; session.nodeName = value }
                 rebootNeeded = rebootNeeded || setting.requiresReboot
             }
             edits = [:]
@@ -408,6 +428,7 @@ struct SettingRow: View {
     let isChanged: Bool
     let unsupported: Bool
     let loaded: Bool
+    var nameLimit = NameLimits.meshCoreRepeater
     var onPreset: ((RadioPreset) -> Void)?
 
     var body: some View {
@@ -423,8 +444,8 @@ struct SettingRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(setting.label)
-                    if isChanged { Circle().fill(.orange).frame(width: 6, height: 6) }
-                    if setting.requiresReboot { Image(systemName: "restart").font(.caption2).foregroundStyle(.secondary).help("Needs a reboot to take effect") }
+                    if isChanged { Circle().fill(.orange).frame(width: 6, height: 6).accessibilityLabel("Changed, not yet applied") }
+                    if setting.requiresReboot { Image(systemName: "restart").font(.caption2).foregroundStyle(.secondary).help("Needs a reboot to take effect").accessibilityLabel("Needs a reboot to take effect") }
                 }
                 Text(setting.help).font(.caption).foregroundStyle(.secondary)
                 if case .radio = setting.kind, !unsupported, loaded { PresetMatchNote(values: RadioValues(cli: text)) }
@@ -436,17 +457,22 @@ struct SettingRow: View {
         switch setting.kind {
         case .radio:
             HStack {
-                TextField("freq,bw,sf,cr", text: $text).textFieldStyle(.roundedBorder).frame(width: 220)
+                TextField("freq,bw,sf,cr", text: $text).textFieldStyle(.roundedBorder).frame(width: 220).accessibilityLabel("Radio parameters: frequency, bandwidth, spreading factor, coding rate")
                 if let onPreset { RadioPresetMenu(current: RadioValues(cli: text), apply: onPreset) }
             }
         case .onOff:
-            Toggle("", isOn: Binding(get: { text.lowercased() == "on" }, set: { text = $0 ? "on" : "off" })).labelsHidden()
+            Toggle(setting.label, isOn: Binding(get: { text.lowercased() == "on" }, set: { text = $0 ? "on" : "off" })).labelsHidden().accessibilityLabel(setting.label)
         case .choice(let options):
-            Picker("", selection: $text) { ForEach(options, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 140)
+            Picker(setting.label, selection: $text) { ForEach(options, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 140)
         case .secret:
-            SecureField("", text: $text).frame(width: 220)
+            SecureField(setting.label, text: $text).frame(width: 220).accessibilityLabel(setting.label)
         default:
-            TextField("", text: $text).textFieldStyle(.roundedBorder).frame(width: setting.id == "radio" || setting.id == "name" ? 240 : 120)
+            if setting.id == "name" {
+                LimitedNameField(title: "", text: $text, limit: nameLimit,
+                                 reason: "Repeaters usually share their location, so other nodes see at most 23 bytes.", width: 240)
+            } else {
+                TextField(setting.label, text: $text).textFieldStyle(.roundedBorder).frame(width: setting.id == "radio" ? 240 : 120).accessibilityLabel(setting.label)
+            }
         }
     }
 }
@@ -527,7 +553,7 @@ struct ConsolePane: View {
             Divider()
             HStack {
                 Text(">").font(.body.monospaced()).foregroundStyle(.secondary)
-                TextField("command", text: $input).textFieldStyle(.plain).font(.body.monospaced())
+                TextField("command", text: $input).textFieldStyle(.plain).font(.body.monospaced()).accessibilityLabel("Console command")
                     .focused($focused).onSubmit { Task { await send() } }
                 if busy { ProgressView().controlSize(.small) }
             }
@@ -546,6 +572,88 @@ struct ConsolePane: View {
             history.append(reply.isEmpty ? "(no reply)" : reply)
         } catch {
             history.append("error: \(error.localizedDescription)")
+        }
+    }
+}
+
+
+/// A 64-character key is shortened in the middle, with the whole thing one click away.
+struct PublicKeyView: View {
+    let hex: String
+    @State private var copied = false
+
+    private var short: String { hex.count > 20 ? "\(hex.prefix(8))…\(hex.suffix(8))" : hex }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(short).font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled).help(hex)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(hex, forType: .string)
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+            } label: {
+                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc").labelStyle(.titleAndIcon).font(.caption)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
+
+/// A name on the left, the value and its stepper on the right, so the label doesn't change as the value does.
+struct StepperRow: View {
+    let title: String
+    let valueText: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 8) {
+                Text(valueText).monospacedDigit().foregroundStyle(.secondary)
+                Stepper(title, value: $value, in: range).labelsHidden().accessibilityLabel(title).accessibilityValue(valueText)
+            }
+        }
+    }
+}
+
+
+/// A name field that shows how much of the firmware's limit is used, and stops at it. Firmware counts bytes, so an
+/// accented letter takes two.
+struct LimitedNameField: View {
+    let title: String
+    @Binding var text: String
+    let limit: Int
+    var reason: String?
+    /// A softer line, shown while the name is longer than this, for what is allowed but won't be shown everywhere.
+    var warnAbove: Int?
+    var warning: String?
+    var width: CGFloat?
+
+    private var used: Int { NameLimits.used(text) }
+    private var showsWarning: Bool { warning != nil && warnAbove.map { used > $0 } == true }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+        LabeledContent(title) {
+            HStack(spacing: 8) {
+                TextField(title, text: $text).labelsHidden().textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
+                    .accessibilityLabel(title.isEmpty ? "Node name" : title)
+                    .frame(width: width)
+                    .onChange(of: text) { old, new in
+                        // Typing stops at the limit; a name that was already longer (the limit dropped when a location was set) is left for the person to shorten.
+                        if NameLimits.used(new) > limit, NameLimits.used(new) > NameLimits.used(old) { text = NameLimits.fit(new, bytes: max(limit, NameLimits.used(old))) }
+                    }
+                Text("\(used)/\(limit)").font(.caption.monospacedDigit())
+                    .accessibilityLabel("\(used) of \(limit) bytes used")
+                    .foregroundStyle(used > limit ? Color.red : used == limit ? Color.orange : .secondary)
+                    .help([reason, "Up to \(limit) bytes. Letters with accents or symbols use more than one."].compactMap { $0 }.joined(separator: " "))
+            }
+        }
+        if showsWarning, let warning {
+            Label(warning, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
+        }
         }
     }
 }

@@ -33,20 +33,20 @@ Layout conventions follow the author's other macOS apps (MDKit, TimeScreen): out
 
 ```
 swift build
-swift test                                    # ~110 tests, ~10 s, no hardware or network
+swift test                                    # ~220 tests, ~10 s, no hardware or network
 MESHKIT_NETWORK_TESTS=1 swift test            # also runs the live-release tests (newest MeshCore and Meshtastic)
 Scripts/build-app.sh                          # build/MeshKit.app, release, host arch, ad-hoc signed
 UNIVERSAL=1 Scripts/build-app.sh              # arm64 + x86_64
 Scripts/package.sh                            # universal build, then build/release/*.zip, *.dmg, SHA256SUMS.txt
 swift Scripts/make-icon.swift Resources       # redraws AppIcon.icns and icon-readme.png
-MESHKIT_HARDWARE_PORT=/dev/cu.usbserial-0001 MESHKIT_HARDWARE_STEP=read swift test --filter HardwareTests  # real Heltec V3 repeater; steps: read, write, update, clean, restore:<file>, catalog, set:<key>=<value>; HardwareFirmwareTests steps: companion, room, meshtastic, alpha-debug
+MESHKIT_HARDWARE_PORT=/dev/cu.usbserial-0001 MESHKIT_HARDWARE_STEP=read swift test --filter HardwareTests  # real Heltec V3 repeater; steps: read, write, update, clean, restore:<file>, catalog, set:<key>=<value>; HardwareFirmwareTests steps: companion, room, meshtastic, alpha-debug, set-location, read-companion, read-meshtastic, share-location, name-limit, carry-companion, install-carry, restore-only:<file>
 swift run esp-sim --port 5555 --chip esp32s3  # simulated ESP for esptool: esptool --port socket://127.0.0.1:5555 chip_id
 swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic --host 127.0.0.1 --info
 ```
 
 - Dev launch switches (any of them skips the Welcome window): `--vendor=meshcore|meshtastic`,
   `--section=firmware|configure|backups|log`, `--demo=companion|repeater|meshtastic`, `--select=<board>`,
-  `--role=Companion|Repeater|…`, `--flash-file=<path>`. `MESHKIT_DUMP_MENU=1` prints the main menu.
+  `--role=Companion|Repeater|…`, `--flash-file=<path>`. `--offline` (or `MESHKIT_OFFLINE=1`) makes every web request fail, to see the saved-list behaviour. `MESHKIT_DUMP_MENU=1` prints the main menu.
 - Screenshots: `screencapture -x -o -l <windowID>` with an ID from `CGWindowListCopyWindowInfo`. It captures a black
   frame when the display is locked.
 - A running app keeps state in `~/Library/Application Support/MeshKit` and `~/Library/Caches/MeshKit`. Tests use
@@ -95,7 +95,21 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
   with a confident match get the menu items, because the wrong bootloader can brick a board.
 - **Meshtastic admin writes** go to our own node, reliable, with `from == 0`; the session key is only enforced for
   packets with `from != 0`; a managed node ignores local admin, and the app says so.
+- **nRF52 backups are labelled from the image.** `NRF52BackupStore.describe` reads the MeshCore (`v1.17.1-d929643`) or Meshtastic (`2.7.26.54e0d8d`) version string out of the UF2; a board changed to a smaller firmware keeps pages of the old one, so the string at the lowest address is the firmware and the other is reported as "leftovers". A backup is whatever the board ran when it was saved, so restore by label, not by date.
+- **Serial DFU is the default for nRF52, UF2 the fallback.** `FirmwareModel.meshCoreInstallRequest` / `meshtasticInstallRequest` (also used by the Firmware menu's Install) pick serial when a `usbmodem` port is present and no drive is mounted; the request's `fallback` closure builds the UF2 request, and a failed serial sheet offers "Use the bootloader drive instead". Serial DFU can't read flash, so it can't back up: the warnings say so, and the Backups tab has manual "Back up now" buttons (nRF52 needs the mounted drive; ESP32 reads the flash over serial, `ESPFlashJob.backupOnly`).
+- **Everything MeshKit writes is listed here, so nothing is left behind unnoticed:** `~/Library/Application Support/MeshKit/` (`FlashBackups/*.bin`, `NRF52Backups/*.uf2`, `Backups/*.json`, `radio-presets-cache.json`), `~/Library/Caches/MeshKit/` (`firmware/`, `web/`), and the `rip.bitstick.MeshKit` preferences. Settings ▸ Backups shows what is saved and has **Delete All Backups…** (`BackupCleanup`: only `.bin/.uf2/.json` files directly inside those three folders); Settings ▸ Firmware has Clear Downloaded Firmware.
+- **Never touch drives that aren't bootloader drives, and never read a drive on the main thread.** macOS asks the person for permission the first time an app reads a file on an external disk, and the call blocks until they answer, so `refreshDevices()` runs detached and `UF2Volumes.detect` opens only small (≤512 MB), external, local volumes. Ad-hoc-signed builds look like a new app to macOS each time, so the prompt returns after every rebuild; a Developer ID signature would stop that.
+- **Serial DFU survives re-enumeration.** After entering the bootloader a board may drop and re-add its USB port (sometimes under a different `usbmodem` number). `NRF52SerialDFUFlasher` retries the whole session up to three times on a closed port or missing acknowledgements, falls back to the only `usbmodem` port that appears, and skips the 1200-baud touch when a bootloader drive is already mounted (the touch restarts a bootloader and changes its port). A failing install marks the step that was running as failed, so a sheet never keeps spinning.
+- **Node name limits count UTF-8 bytes** (`NameLimits`): Meshtastic long name 39, short name 4; MeshCore stores 31 (checked on a companion: a longer name is cut at 31, even mid-character). Other nodes see less when the node shares its location: an advert carries 32 bytes of data (`MAX_ADVERT_DATA_SIZE`), a flag byte, 8 bytes of location, then the name, so 23. Whether the location goes out depends on the advert location policy (`none`, `prefs`, `share`: the companion's `advertLocationShared`), not on the coordinates (a T096 with a location set and sharing off still advertises 31; a node that shares advertises 23 even at 0, 0). Decision: repeaters and room servers are held to 23 (they will usually share), while a companion may use up to 31 and gets a warning past 23 that only 23 are shown if the location is shared. Convert shortens a carried name to 31 and warns when a name over 23 would be cut by location sharing.
+- **Release lists and downloaded firmware are cached for 30 days** (`DiskCache`, in `Caches/MeshKit/web` plus the existing `firmware` folder). Lists are always fetched fresh when the network answers; the saved copy is only used when it doesn't. `RemoteZip(url:size:)` caches each entry it reads. Pruned at launch; Settings ▸ Firmware clears it.
+- **nRF52 installs, clean installs and restores all work over serial DFU, with no drive.** The Meshtastic Install button and the Backups Restore button use it when a `usbmodem` port is present and no UF2 drive is mounted (`installsOverSerial` in `FirmwareView.swift`); MeshCore uses it from the ⋯ menu. Serial DFU only replaces the application, which starts where the SoftDevice ends: `NRF52SoftDevice.info` reads that (size and firmware ID) from the information block at 0x3004 of a backup, and `NRF52DFUPackage.softDevices` reads the IDs a package needs (0x123 = S140 7.3.0 → "7.3", 0xA9/0xAE/0xB6 → "6.1").
+  - *Clean install* (`NRF52SerialCleanFlasher`): Meshtastic's erase tool (an app-only UF2, chosen by the package's SoftDevice) is sent as if it were the firmware; it wipes the board once a host opens its serial port and drops back into the bootloader (`wipeThroughSerial` opens the port when it appears and waits for it to vanish and return), then the real firmware goes in. Verified on a Wio Tracker L1: the node name reset to the default.
+  - *Restore* (`NRF52DFUPackage.restoring(backup:)`): the application part of a backup is sent with the backup's own SoftDevice ID; the SoftDevice and bootloader are not rewritten. Verified both ways on a Wio Tracker L1 (MeshCore ↔ Meshtastic).
+  - The init packet is `52 00 ffff ffffffff <count> <ids> <crc16>`; the CRC-16 matches nrfutil's (checked against Meshtastic's own `-ota.zip`).
 - **Other MeshCore firmware sources are user-added, never built in.** Settings ▸ Firmware stores `owner/repo` entries (`FirmwareSourceStore`, UserDefaults); the MeshCore window then shows a Source picker. Forks don't split roles by tag like the official repo, so for a custom source every release is scanned and only assets containing the role marker (`_repeater`, `_room_server`, `_companion_radio`) count (`requireRole`). Version strings may carry a suffix (`1.17.1.25-dev`). Installs of these builds carry a "not from the MeshCore project" warning. Meshtastic has no equivalent.
+- **Release notes go in both places from one file:** `NOTES_FILE=notes.md Scripts/package.sh` embeds them in the appcast (Sparkle shows them in its update window), then `gh release create … -F notes.md` uses the same file. Write them for people using the app, not as a changelog.
+- **Accessibility:** icon-only buttons are `Label(…).labelStyle(.iconOnly)` so VoiceOver has a name; plain-styled custom controls (the toolbar tabs) set `accessibilityElement(children: .ignore)` plus a label and traits; text fields and Form pickers carry explicit `accessibilityLabel`s (grouped Forms don't expose them); state shown by an icon or colour alone (install steps, error lines in the Log, the connection dot, "changed" dots) also has words. Check with an `AXUIElement` walk (title / description of every control), not AppleScript's `description`, which falls back to the role name and misreports.
+- **A Convert's last step finishes after the flash:** the sheet shows "Done" only once "Set the name and location" has ended, and that step reads the values back and fails loudly if the board didn't keep them. A board still on its first boot can answer and then lose what was written, so quitting early used to lose them.
 - **Auto-updates use Sparkle.** The feed is `releases/latest/download/appcast.xml`, so every release must upload `build/release/appcast.xml` (written by `Scripts/package.sh`, signed with the EdDSA key in the login keychain, account `rip.bitstick.MeshKit`; the public half is `SUPublicEDKey` in `Info.plist`). Sparkle compares `CFBundleVersion`, which must be bumped with `CFBundleShortVersionString` (both are the release version). Losing the private key means installed copies can't update, so back it up with `generate_keys -x`.
 - **Release data is untrusted.** Tag and asset names go through `ReleaseClient.safeComponent` before touching a
   path; URLs built from tags never force-unwrap. Radio presets from the network are validated (`isValid`) because
@@ -138,10 +152,11 @@ swift run esp-sim --meshtastic --port 4403    # simulated node for: meshtastic -
 - **Ask before outward or irreversible actions:** pushing, publishing a release, committing in someone else's
   repo, deleting data. Approval for one does not carry to the next.
 - **Never touch the user's uncommitted work.** Do not `git stash`, `reset` or `checkout` to compare things.
-- **Be honest about verification.** Say what was tested and what was not. Only the Heltec V3 (Meshtastic including a
-  clean install, MeshCore companion and repeater) has run on real hardware; say so rather than implying more.
-  Not tried on hardware: CH340 and native-USB ESP32 boards, the
-  Developer ID signing and notarisation path.
+- **Be honest about verification.** Say what was tested and what was not. Run on real hardware: Heltec V3 (Meshtastic,
+  MeshCore companion, repeater and room server; backup and restore), Wio Tracker L1 and Heltec T096 (serial DFU, clean
+  install, restore, Convert both ways, name and location carried over). Not tried on hardware: CH340 and native-USB
+  ESP32 boards, other nRF52 boards, Convert on ESP32, a node that shares its location (the 23-byte name limit is read from
+  MeshCore's source, not seen on air), and the Developer ID signing and notarisation path.
 - **No comments unless the code is not self-explanatory.** Comment only a non-obvious *why* (a protocol quirk, a
   SwiftUI workaround), never what the code already says.
 - **Keep documentation short.** One README, this file, `AI-DISCLOSURE.md`, `THIRD-PARTY-NOTICES.md`. No `docs/`

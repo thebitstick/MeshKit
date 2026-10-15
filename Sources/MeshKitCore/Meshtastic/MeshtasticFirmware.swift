@@ -10,8 +10,8 @@ public enum MeshtasticChannel: String, CaseIterable, Identifiable, Sendable {
 
     public var blurb: String {
         switch self {
-        case .stable: "The releases Meshtastic recommends for everyday use."
-        case .alpha: "Pre-release builds with the newest changes. May have bugs."
+        case .stable: "Recommended for everyday use."
+        case .alpha: "Newest changes. May have bugs."
         }
     }
 }
@@ -112,8 +112,8 @@ public enum MeshtasticInstallMode: String, CaseIterable, Identifiable, Sendable 
     public var id: String { rawValue }
     public var blurb: String {
         switch self {
-        case .update: "Replaces the firmware and keeps your settings, channels and keys."
-        case .fresh: "Erases the whole flash first. Use for a new board or when something is broken. Settings are lost."
+        case .update: "Keeps your settings, channels and keys."
+        case .fresh: "Erases everything first. For new or broken boards. Settings are lost."
         }
     }
 }
@@ -132,9 +132,11 @@ public struct MeshtasticCatalog: Sendable {
     }
 
     private func fetch(_ url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: request(url))
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw MeshtasticError.http(http.statusCode) }
-        return data
+        try await DiskCache.fetch("meshtastic|\(url.absoluteString)") {
+            let (data, response) = try await URLSession.shared.data(for: request(url))
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw MeshtasticError.http(http.statusCode) }
+            return data
+        }
     }
 
     public func releases(limit: Int = 12) async throws -> [MeshtasticRelease] {

@@ -49,8 +49,11 @@ public enum OTAFix {
     public static func latestRelease() async throws -> GitHubRelease {
         let client = ReleaseClient()
         let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
-        let (data, response) = try await URLSession.shared.data(for: client.request(url))
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw ReleaseError.http(http.statusCode) }
+        let data = try await DiskCache.fetch("otafix-latest") {
+            let (data, response) = try await URLSession.shared.data(for: client.request(url))
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw ReleaseError.http(http.statusCode) }
+            return data
+        }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601

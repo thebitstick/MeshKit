@@ -63,10 +63,12 @@ public struct HTTPRangeSource: RangeSource {
 
 public actor RemoteZip {
     private let source: RangeSource
+    private let cacheKey: String?
     private var cached: [ZipEntry]?
 
-    public init(source: RangeSource) { self.source = source }
-    public init(url: URL, size: Int) { self.source = HTTPRangeSource(url: url, size: size) }
+    public init(source: RangeSource) { self.source = source; self.cacheKey = nil }
+    /// Files read from an archive on the web are kept for a month, so the same install works again offline.
+    public init(url: URL, size: Int) { self.source = HTTPRangeSource(url: url, size: size); self.cacheKey = "zip|\(url.absoluteString)|\(size)" }
 
     public func entries() async throws -> [ZipEntry] {
         if let cached { return cached }
@@ -129,6 +131,13 @@ public actor RemoteZip {
     }
 
     public func read(_ name: String) async throws -> Data {
+        if let cacheKey, let saved = DiskCache.read("\(cacheKey)|\(name)") { return saved }
+        let data = try await readEntry(name)
+        if let cacheKey { DiskCache.write(data, for: "\(cacheKey)|\(name)") }
+        return data
+    }
+
+    private func readEntry(_ name: String) async throws -> Data {
         let e = try await entry(named: name)
         let size = source.size
         // Local header: 30 fixed bytes + name + extra. Over-read the variable part, then trim.

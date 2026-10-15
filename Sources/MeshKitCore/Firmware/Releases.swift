@@ -195,7 +195,7 @@ public enum MeshCoreConnection: String, CaseIterable, Identifiable, Sendable {
     public var shortTitle: String {
         switch self {
         case .usb: "USB"
-        case .ble: "BLE"
+        case .ble: "Bluetooth"
         case .wifi: "Wi-Fi"
         }
     }
@@ -210,9 +210,9 @@ public enum MeshCoreConnection: String, CaseIterable, Identifiable, Sendable {
 
     public var blurb: String {
         switch self {
-        case .usb: "Serial companion. For computers and web apps over a cable, and what MeshKit configures. Choose this to manage the node from this Mac."
-        case .ble: "Bluetooth companion. For pairing with the MeshCore phone apps. MeshKit can install it but can't configure it over Bluetooth yet."
-        case .wifi: "Wi-Fi companion. Connects to apps over your network."
+        case .usb: "For managing the node from this Mac over a cable. What MeshKit configures."
+        case .ble: "For the MeshCore phone apps. MeshKit installs it but can't configure it."
+        case .wifi: "Connects to apps over your network."
         }
     }
 
@@ -290,8 +290,11 @@ public struct ReleaseClient: Sendable {
     public func releases(for role: MeshCoreRole, limit: Int = 4) async throws -> [GitHubRelease] {
         // Roles share one release feed, so over-fetch and filter by tag prefix.
         let url = URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=60")!
-        let (data, response) = try await URLSession.shared.data(for: request(url))
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw ReleaseError.http(http.statusCode) }
+        let data = try await DiskCache.fetch("github-releases|\(repository)") {
+            let (data, response) = try await URLSession.shared.data(for: request(url))
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw ReleaseError.http(http.statusCode) }
+            return data
+        }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601
@@ -324,7 +327,7 @@ public struct ReleaseClient: Sendable {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent(Self.safeComponent(artifact.asset.name))
 
-        if let existing = try? Data(contentsOf: dest), Self.verify(existing, digest: artifact.asset.digest) == nil { return dest }
+        if let existing = try? Data(contentsOf: dest), Self.verify(existing, digest: artifact.asset.digest) == nil { DiskCache.touch(dest); return dest }
 
         let (tmp, response) = try await URLSession.shared.download(for: request(artifact.asset.browserDownloadUrl))
         if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw ReleaseError.http(http.statusCode) }

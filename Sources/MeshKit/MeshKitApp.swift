@@ -72,7 +72,9 @@ struct MeshKitApp: App {
         // Running via `swift run` (no app bundle) needs this to get a menu bar and focus.
         NSApplication.shared.setActivationPolicy(.regular)
         Self.discardSavedWindowState()
-        _ = Updater.shared
+        OfflineSimulation.enableIfRequested()
+        Updater.shared.startSoon()
+        DispatchQueue.global(qos: .utility).async { DiskCache.prune() }
         UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true, "NSQuitAlwaysKeepsWindows": false])
         let workspace = Workspace()
         _workspace = State(initialValue: workspace)
@@ -251,7 +253,7 @@ struct MeshKitCommands: Commands {
                 .disabled(focused?.canSendCommands != true)
             Button("Reboot Device") { Task { await focused?.rebootDevice() } }
                 .disabled(focused?.canSendCommands != true)
-            Button("Enter DFU Mode (nRF52)") { Task { await focused?.enterDFUModeOnLikelyPort() } }
+            Button("Restart in Update Mode (nRF52)") { Task { await focused?.enterDFUModeOnLikelyPort() } }
                 .disabled(focused?.dfuCandidatePorts.isEmpty != false)
 
             if let model = focused, model.vendor == .meshcore {
@@ -311,13 +313,23 @@ struct MeshKitCommands: Commands {
             Button("Install Selected Board…") {
                 guard let model = focused else { return }
                 model.section = .firmware
-                model.pendingFlash = model.vendor == .meshcore ? model.firmware.meshCoreRequest(model: model) : model.firmware.meshtasticRequest()
+                model.pendingFlash = model.vendor == .meshcore ? model.firmware.meshCoreInstallRequest(model: model) : model.firmware.meshtasticInstallRequest(model: model)
             }
             .keyboardShortcut("i")
             .disabled(installDisabled)
         }
 
         CommandGroup(replacing: .help) {
+            Menu("Try a Demo Device") {
+                if focused?.vendor == .meshtastic {
+                    Button("Demo Meshtastic Node") { if let m = focused { Task { await m.connectDemo(.meshtastic); m.section = .configure } } }
+                } else {
+                    Button("Demo Companion") { if let m = focused { Task { await m.connectDemo(.companion); m.section = .configure } } }
+                    Button("Demo Repeater") { if let m = focused { Task { await m.connectDemo(.repeater); m.section = .configure } } }
+                }
+            }
+            .disabled(focused == nil)
+            Divider()
             Link("MeshCore Documentation", destination: URL(string: "https://docs.meshcore.io")!)
             Link("Meshtastic Documentation", destination: URL(string: "https://meshtastic.org/docs/")!)
             Divider()
@@ -407,7 +419,7 @@ private struct WelcomeRow: View {
                 Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            Image(systemName: "chevron.right").foregroundStyle(.tertiary).accessibilityHidden(true)
         }
         .padding(12)
         .background(hovering ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
@@ -426,65 +438,94 @@ struct SettingsView: View {
     @State private var sources = FirmwareSourceStore.load()
     @State private var newRepository = ""
     @State private var newName = ""
+    @State private var backupSummary = BackupCleanup.summary()
+    @State private var confirmDeleteBackups = false
+    @State private var cacheSize = ""
 
     var body: some View {
         @Bindable var fw = workspace.meshtastic.firmware
         TabView {
             Form {
-                Picker("Default speed", selection: $baud) {
-                    Text("115,200 (slowest, most compatible)").tag(115_200)
-                    Text("460,800").tag(460_800)
-                    Text("921,600 (fastest)").tag(921_600)
+                Section {
+                    Picker("Flash speed", selection: $baud) {
+                        Text("115,200 (slowest)").tag(115_200)
+                        Text("460,800").tag(460_800)
+                        Text("921,600 (fastest)").tag(921_600)
+                    }
+                    .accessibilityLabel("Flash speed")
+                    Text("Lower it if an install fails partway.").font(.caption).foregroundStyle(.secondary)
                 }
-                Toggle("Back up the flash before installing", isOn: $backupFirst)
+                Section {
+                    Toggle("Back up before installing", isOn: $backupFirst).accessibilityLabel("Back up before installing")
+                    Text("The starting choice for each install. You can change it for one install in its window.").font(.caption).foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
             .tabItem { Label("Flashing", systemImage: "bolt.horizontal") }
 
             Form {
-                Toggle("Show community and unofficial Meshtastic boards", isOn: $fw.showCommunityBoards)
-                Button("Clear Downloaded Firmware") { try? FileManager.default.removeItem(at: ReleaseClient.cacheDirectory) }
-
-                Section("Other MeshCore firmware sources") {
+                Section("Boards") {
+                    Toggle("Show community Meshtastic boards", isOn: $fw.showCommunityBoards).accessibilityLabel("Show community Meshtastic boards")
+                }
+                Section("Other MeshCore firmware") {
                     ForEach(sources) { source in
                         LabeledContent(source.name) {
                             HStack {
                                 Text(source.repository).foregroundStyle(.secondary)
-                                Button { remove(source) } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                                Button { remove(source) } label: { Label("Remove \(source.name)", systemImage: "minus.circle").labelStyle(.iconOnly) }.buttonStyle(.borderless)
                             }
                         }
                     }
+                    TextField("GitHub project", text: $newRepository, prompt: Text("owner/repo")).accessibilityLabel("GitHub project, owner slash repo")
                     HStack {
-                        TextField("GitHub project", text: $newRepository, prompt: Text("owner/repo"))
-                        TextField("Name", text: $newName, prompt: Text("Optional"))
-                        Button("Add") { add() }
-                            .disabled(FirmwareSource.normalize(newRepository) == nil)
+                        TextField("Name", text: $newName, prompt: Text("Optional")).accessibilityLabel("Source name, optional")
+                        Button("Add") { add() }.disabled(FirmwareSource.normalize(newRepository) == nil)
                     }
-                    Text("Builds from other projects appear beside the official ones in the MeshCore window. MeshKit can't vouch for them.")
+                    Text("Shown beside the official builds in the MeshCore window. MeshKit can't vouch for them.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section("Storage") {
+                    LabeledContent("Downloaded firmware", value: cacheSize)
+                    Button("Clear Downloaded Firmware") { DiskCache.clear(); cacheSize = DiskCache.sizeText() }
+                    Text("Kept for 30 days so installs work offline.").font(.caption).foregroundStyle(.secondary)
+                }
             }
+            .onAppear { cacheSize = DiskCache.sizeText() }
             .formStyle(.grouped)
             .tabItem { Label("Firmware", systemImage: "square.and.arrow.down.on.square") }
 
             Form {
                 Button("Show Flash Backups") { workspace.meshcore.revealInFinder(FlashBackupStore.directory) }
                 Button("Show Settings Backups") { workspace.meshcore.revealInFinder(SnapshotStore.directory) }
+                LabeledContent("Saved backups", value: backupSummary.text)
+                Button("Delete All Backups…", role: .destructive) { confirmDeleteBackups = true }
+                    .disabled(backupSummary.isEmpty)
+                    .confirmationDialog("Delete all saved backups?", isPresented: $confirmDeleteBackups, titleVisibility: .visible) {
+                        Button("Delete \(backupSummary.text)", role: .destructive) {
+                            BackupCleanup.deleteAll()
+                            workspace.meshcore.reloadFlashBackups(); workspace.meshtastic.reloadFlashBackups()
+                            backupSummary = BackupCleanup.summary()
+                        }
+                    } message: {
+                        Text("Deletes flash images, nRF52 firmware and settings backups, including identity keys. Files MeshKit didn't save are untouched.")
+                    }
             }
+            .onAppear { backupSummary = BackupCleanup.summary() }
             .formStyle(.grouped)
             .tabItem { Label("Backups", systemImage: "externaldrive.badge.timemachine") }
 
             Form {
-                Toggle("Check for updates automatically", isOn: $checksForUpdates)
+                Toggle("Check for updates automatically", isOn: $checksForUpdates).accessibilityLabel("Check for updates automatically")
                     .onChange(of: checksForUpdates) { _, on in Updater.shared.automaticallyChecks = on }
                 LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development")
+                LabeledContent("Last checked", value: Updater.shared.lastChecked.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "Never")
                 Button("Check Now") { Updater.shared.checkForUpdates() }
             }
             .formStyle(.grouped)
             .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
         }
         .scenePadding()
-        .frame(width: 540, height: 360)
+        .frame(width: 540, height: 600)
     }
 
     private func add() {
@@ -555,17 +596,21 @@ struct DeviceButton: View {
         Button { model.showingDevices.toggle() } label: {
             if let session = model.session {
                 HStack(spacing: 6) {
-                    Circle().fill(.green).frame(width: 7, height: 7)
+                    Circle().fill(.green).frame(width: 7, height: 7).accessibilityHidden(true)
                     Text(session.title).lineLimit(1).frame(maxWidth: 110, alignment: .leading)
+                    Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary).accessibilityHidden(true)
                 }
             } else {
                 HStack(spacing: 6) {
-                    Circle().fill(.secondary.opacity(0.5)).frame(width: 7, height: 7)
+                    Circle().fill(.secondary.opacity(0.5)).frame(width: 7, height: 7).accessibilityHidden(true)
                     Text("Disconnected")
+                    Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                 }
             }
         }
         .help(model.session == nil ? "Connect to a device" : "Devices")
+        .accessibilityLabel(model.session.map { "Device: \($0.title), connected" } ?? "Device: disconnected")
+        .accessibilityHint("Opens the list of devices")
         .popover(isPresented: $model.showingDevices, arrowEdge: .bottom) { DevicesView() }
     }
 }
@@ -589,7 +634,9 @@ struct SectionTabs: View {
                     .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(section == .firmware ? "\(model.vendor.rawValue) firmware" : section.rawValue)
+                .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
             }
         }
     }

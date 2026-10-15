@@ -27,6 +27,7 @@ public final class SimulatedMeshtasticNode: ByteTransport, @unchecked Sendable {
     public private(set) var committedTransactions = 0
     public private(set) var rebootRequests: [Int32] = []
     public private(set) var dfuRequests = 0
+    public private(set) var fixedPosition: (latitude: Double, longitude: Double)?
 
     public init() {
         channels = (0..<8).map { i in
@@ -141,6 +142,7 @@ public final class SimulatedMeshtasticNode: ByteTransport, @unchecked Sendable {
             case .setConfig(let c):
                 if case .lora(let l)? = c.payloadVariant { lora = l }
                 if case .device(let d)? = c.payloadVariant { device = d; owner.role = d.role }
+            case .setFixedPosition(let p): fixedPosition = (Double(p.latitudeI) / 1e7, Double(p.longitudeI) / 1e7)
             case .setChannel(let c): channels[Int(c.index)] = c
             case .commitEditSettings: inTransaction = false; committedTransactions += 1
             case .rebootSeconds(let s): rebootRequests.append(s)

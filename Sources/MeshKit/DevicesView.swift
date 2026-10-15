@@ -17,24 +17,25 @@ struct DevicesView: View {
                         .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                 }
 
-                Card("USB serial", symbol: "cable.connector", footnote: "ESP32 boards reset when a port is opened, so connecting takes a moment.") {
+                Card("USB serial", symbol: "cable.connector", footnote: model.ports.contains(where: { !$0.path.contains("usbmodem") }) ? "ESP32 boards reset when a port is opened, so connecting takes a moment." : nil) {
                     if model.ports.isEmpty {
                         EmptyRow(text: model.vendor == .meshcore
-                            ? "No USB serial devices found. Plug in a board running MeshCore companion (USB), repeater or room server firmware, using a data cable."
+                            ? "No USB serial devices. Plug a board in with a data cable (not a charge-only one)."
                             : "No USB serial devices found. Plug in a board running Meshtastic firmware, using a data cable.")
                     }
                     ForEach(model.ports) { port in
                         HStack {
                             Image(systemName: "memorychip").foregroundStyle(.secondary).frame(width: 22)
                             VStack(alignment: .leading) {
-                                Text(port.displayName).font(.body.monospaced())
-                                Text(port.hint).font(.caption).foregroundStyle(.secondary)
+                                Text(port.productName ?? port.hint)
+                                Text(port.productName == nil ? port.displayName : "\(port.displayName) · \(port.hint)")
+                                    .font(.caption.monospaced()).foregroundStyle(.secondary)
                             }
                             Spacer()
                             if model.connectingTo == port.displayName { ProgressView().controlSize(.small) }
                             if port.path.contains("usbmodem") {
-                                Button("DFU") { Task { await model.enterDFUMode(port: port) } }
-                                    .help("Restart this nRF52 board into DFU mode, whatever firmware it runs")
+                                Button("Update mode") { Task { await model.enterDFUMode(port: port) } }
+                                    .help("Restart this nRF52 board so it can take new firmware, whatever it runs now")
                                     .disabled(model.connectingTo != nil)
                             }
                             Button("Connect") { Task { await model.connect(port: port); if model.session != nil { model.showingDevices = false } } }
@@ -44,41 +45,24 @@ struct DevicesView: View {
                     }
                 }
 
-                Card("UF2 bootloader volumes", symbol: "externaldrive", footnote: "The DFU button next to an nRF52 board's serial port restarts a Meshtastic node into this drive. Other firmware restarts into serial DFU, which has no drive and takes Install over USB serial; double-tap reset for the drive.") {
-                    if model.uf2Volumes.isEmpty { EmptyRow(text: "No UF2 bootloader drives mounted.") }
-                    ForEach(model.uf2Volumes) { v in
-                        HStack {
-                            Image(systemName: "externaldrive.fill").foregroundStyle(.secondary).frame(width: 22)
-                            VStack(alignment: .leading) {
-                                Text(v.name).font(.body.monospaced())
-                                Text([v.model, v.boardID].filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(.caption).foregroundStyle(.secondary)
+                if !model.uf2Volumes.isEmpty {
+                    Card("Boards in update mode", symbol: "externaldrive") {
+                        ForEach(model.uf2Volumes) { v in
+                            HStack {
+                                Image(systemName: "externaldrive.fill").foregroundStyle(.secondary).frame(width: 22)
+                                VStack(alignment: .leading) {
+                                    Text(v.name).font(.body.monospaced())
+                                    Text([v.model, v.boardID].filter { !$0.isEmpty }.joined(separator: " · "))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Install firmware…") { finish(opening: .firmware) }
                             }
-                            Spacer()
-                            Button("Install firmware…") { finish(opening: .firmware) }
+                            .padding(.vertical, 2)
                         }
-                        .padding(.vertical, 2)
                     }
                 }
 
-                Card("Demo devices", symbol: "testtube.2", footnote: "Simulated radios for trying the interface without hardware.") {
-                    HStack {
-                        if model.vendor == .meshcore {
-                            Button { Task { await model.connectDemo(.companion); finish(opening: .configure) } } label: {
-                                Label("Demo companion", systemImage: "iphone.radiowaves.left.and.right")
-                            }
-                            Button { Task { await model.connectDemo(.repeater); finish(opening: .configure) } } label: {
-                                Label("Demo repeater", systemImage: "antenna.radiowaves.left.and.right")
-                            }
-                        } else {
-                            Button { Task { await model.connectDemo(.meshtastic); finish(opening: .configure) } } label: {
-                                Label("Demo Meshtastic", systemImage: "point.3.connected.trianglepath.dotted")
-                            }
-                        }
-                        Spacer()
-                    }
-                    .disabled(model.connectingTo != nil)
-                }
             }
             .padding(16)
         }

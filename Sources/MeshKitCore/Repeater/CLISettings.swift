@@ -33,7 +33,7 @@ public enum CLICatalog {
     public static let groups = ["Identity", "Radio", "Routing", "Adverts"]
 
     public static let all: [CLISetting] = [
-        s("name", "Node name", "Identity", .text, "Shown to other nodes (about 23–31 UTF-8 bytes)."),
+        s("name", "Node name", "Identity", .text, "Shown to other nodes, up to 23 UTF-8 bytes."),
         s("lat", "Latitude", "Identity", .number(-90...90), "Degrees. 0 means unset."),
         s("lon", "Longitude", "Identity", .number(-180...180), "Degrees. 0 means unset."),
         s("owner.info", "Owner info", "Identity", .text, "Free text; use | for newlines."),

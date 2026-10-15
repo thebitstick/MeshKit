@@ -48,7 +48,7 @@ import Testing
         }
 
         let flasher = UF2VolumeFlasher(volume: volume, image: firmware, erase: NRF52EraseImages(images: ["7.3": eraseImage]),
-                                       findVolumes: { UF2Volumes.detect(volumesRoot: root) },
+                                       findVolumes: { UF2Volumes.detect(volumesRoot: root, bootloaderSizedOnly: false) },
                                        candidatePorts: { ["/dev/cu.usbmodemFAKE"] },
                                        holdPort: { path, _ in poked.value.append(path); try? await Task.sleep(for: .milliseconds(50)) },
                                        returnTimeout: .seconds(10))
@@ -70,5 +70,18 @@ import Testing
         let flasher = UF2VolumeFlasher(volume: volume, image: UF2Tests.makeUF2(blocks: 4), erase: NRF52EraseImages(images: ["7.3": UF2Tests.makeUF2(blocks: 2)]))
         await #expect(throws: UF2Error.self) { try await flasher.run { _, _ in } }
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("NEW.UF2").path))
+    }
+}
+
+@Suite struct BootloaderDriveFilterTests {
+    @Test func aDriveThatIsNotBootloaderSizedIsNeverOpened() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vols-\(UUID().uuidString)")
+        let volume = root.appendingPathComponent("BIGDRIVE")
+        try FileManager.default.createDirectory(at: volume, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("UF2 Bootloader\nModel: Fake\nBoard-ID: FAKE\n".utf8).write(to: volume.appendingPathComponent("INFO_UF2.TXT"))
+        // These sit on this Mac's internal disk, so by size and kind they are not a bootloader drive.
+        #expect(UF2Volumes.detect(volumesRoot: root).isEmpty)
+        #expect(UF2Volumes.detect(volumesRoot: root, bootloaderSizedOnly: false).count == 1)
     }
 }

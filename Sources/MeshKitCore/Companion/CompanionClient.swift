@@ -206,6 +206,12 @@ public actor CompanionClient {
     public func syncClock() async throws { try await command(CompanionRequest.setDeviceTime(UInt32(Date().timeIntervalSince1970))) }
     public func sendAdvert(flood: Bool) async throws { try await command(CompanionRequest.sendSelfAdvert(flood: flood)) }
     public func setName(_ name: String) async throws { try await command(CompanionRequest.setAdvertName(name)) }
+    /// Turns location in adverts on or off, keeping the node's other "other params" as they were.
+    public func setLocationSharing(_ on: Bool, current me: SelfInfo) async throws {
+        try await command(CompanionRequest.setOtherParams(manualAddContacts: me.manualAddContacts, telemetryModes: me.telemetryModes,
+                                                          shareLocation: on, multiAcks: me.multiAcks))
+    }
+
     public func setTxPower(_ dBm: Int) async throws { try await command(CompanionRequest.setTxPower(dBm)) }
     public func setLocation(latitude: Double, longitude: Double) async throws {
         try await command(CompanionRequest.setAdvertLatLon(latitude: latitude, longitude: longitude))

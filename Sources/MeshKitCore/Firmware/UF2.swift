@@ -91,9 +91,22 @@ public struct UF2Volume: Identifiable, Hashable, Sendable {
 }
 
 public enum UF2Volumes {
-    public static func detect(volumesRoot: URL = URL(fileURLWithPath: "/Volumes")) -> [UF2Volume] {
-        let urls = (try? FileManager.default.contentsOfDirectory(at: volumesRoot, includingPropertiesForKeys: nil)) ?? []
-        return urls.compactMap { url in
+    /// A bootloader drive is a tiny external disk (they report a few megabytes). Anything bigger, or internal, is never
+    /// opened: reading a file on an external disk makes macOS ask the person for permission, and a person's own drives are
+    /// none of this app's business.
+    static let largestBootloaderDrive = 512 << 20
+
+    public static func detect(volumesRoot: URL = URL(fileURLWithPath: "/Volumes"), bootloaderSizedOnly: Bool = true) -> [UF2Volume] {
+        let keys: [URLResourceKey] = [.volumeTotalCapacityKey, .volumeIsInternalKey, .volumeIsLocalKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(at: volumesRoot, includingPropertiesForKeys: keys)) ?? []
+        return urls.filter { url in
+            guard bootloaderSizedOnly else { return true }
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            guard values?.volumeIsInternal != true, values?.volumeIsLocal != false,
+                  let capacity = values?.volumeTotalCapacity, capacity > 0, capacity <= largestBootloaderDrive else { return false }
+            return true
+        }
+        .compactMap { url in
             let info = url.appendingPathComponent("INFO_UF2.TXT")
             guard let text = try? String(contentsOf: info, encoding: .utf8) else { return nil }
             return parse(infoText: text, url: url)

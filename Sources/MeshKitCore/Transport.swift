@@ -1,4 +1,5 @@
 import Foundation
+import IOKit
 
 public protocol ByteTransport: AnyObject, Sendable {
     func subscribe() -> AsyncStream<Data>
@@ -51,7 +52,11 @@ public enum SerialError: Error, LocalizedError {
 
 public struct SerialPortInfo: Identifiable, Hashable, Sendable {
     public let path: String
+    /// The name the board gives over USB ("Heltec T096"), when macOS knows it.
+    public var productName: String?
     public var id: String { path }
+
+    public init(path: String, productName: String? = nil) { self.path = path; self.productName = productName }
 
     public var displayName: String {
         String(path.dropFirst("/dev/cu.".count))
@@ -69,10 +74,10 @@ public struct SerialPortInfo: Identifiable, Hashable, Sendable {
 public enum SerialDiscovery {
     public static func list() -> [SerialPortInfo] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: "/dev")) ?? []
-        return names
-            .filter { $0.hasPrefix("cu.") && ["usbmodem", "usbserial", "wchusbserial", "SLAB_USBtoUART"].contains(where: $0.contains) }
-            .sorted()
-            .map { SerialPortInfo(path: "/dev/" + $0) }
+        let found = names.filter { $0.hasPrefix("cu.") && ["usbmodem", "usbserial", "wchusbserial", "SLAB_USBtoUART"].contains(where: $0.contains) }.sorted()
+        guard !found.isEmpty else { return [] }
+        let products = USBProductNames.names
+        return found.map { SerialPortInfo(path: "/dev/" + $0, productName: products["/dev/" + $0]) }
     }
 }
 
@@ -151,5 +156,38 @@ public final class SerialPort: ByteTransport, @unchecked Sendable {
         source?.cancel()
         source = nil
         broadcaster.finish()
+    }
+}
+
+
+/// USB names that don't say which board they are. Only names seen on real boards are listed.
+public enum USBNameAliases {
+    static let known = ["HT-n5262G": "Heltec T096"]
+
+    public static func boardName(forUSBName name: String) -> String { known[name] ?? name }
+
+    /// A USB-to-serial chip's name ("CP2102 USB to UART Bridge Controller") says what the chip is, not which board it is on.
+    public static func isGeneric(_ name: String) -> Bool {
+        ["uart", "bridge", "serial", "cp210", "ch340", "ch341", "ch9102", "ftdi"].contains { name.lowercased().contains($0) }
+    }
+}
+
+/// The USB product string of each serial port (what the board calls itself), read from the I/O Registry.
+public enum USBProductNames {
+    public static var names: [String: String] {
+        var result: [String: String] = [:]
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOSerialBSDClient"), &iterator) == KERN_SUCCESS else { return [:] }
+        defer { IOObjectRelease(iterator) }
+        while case let entry = IOIteratorNext(iterator), entry != 0 {
+            defer { IOObjectRelease(entry) }
+            guard let callout = IORegistryEntryCreateCFProperty(entry, "IOCalloutDevice" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String else { continue }
+            let flags = IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)
+            if let product = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, "USB Product Name" as CFString, kCFAllocatorDefault, flags) as? String,
+               !product.trimmingCharacters(in: .whitespaces).isEmpty {
+                result[callout] = product
+            }
+        }
+        return result
     }
 }

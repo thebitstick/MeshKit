@@ -160,3 +160,40 @@ final class SimulatedSerialDFU: ByteTransport, @unchecked Sendable {
         return out
     }
 }
+
+/// A bootloader whose USB port disappears under the host partway through, as happens when a board re-enumerates.
+final class DroppingSerialDFU: ByteTransport, @unchecked Sendable {
+    private let inner = SimulatedSerialDFU()
+    private let lock = NSLock()
+    private var sends = 0
+    let dropAfter: Int
+    init(dropAfter: Int) { self.dropAfter = dropAfter }
+    func subscribe() -> AsyncStream<Data> { inner.subscribe() }
+    func close() { inner.close() }
+    func send(_ data: Data) async throws {
+        let n = lock.withLock { sends += 1; return sends }
+        if n > dropAfter { throw SerialError.closed }
+        try await inner.send(data)
+    }
+}
+
+extension NRF52SerialDFUTests {
+    @Test func aPortThatDisappearsMidSessionIsReopenedAndTheSessionRestarted() async throws {
+        let first = DroppingSerialDFU(dropAfter: 4)
+        let second = SimulatedSerialDFU()
+        let queue = Locked<[ByteTransport]>([first, second])
+        let firmware = Data(repeating: 0x42, count: 3_000)
+        let flasher = NRF52SerialDFUFlasher(portPath: "/dev/cu.fake", package: NRF52DFUPackage(initPacket: Data([1]), firmware: firmware),
+                                            waitScale: 0, touchPort: {}, openPort: { queue.value.removeFirst() })
+        try await flasher.run { _, _ in }
+        #expect(second.problems.isEmpty)
+        #expect(second.firmware == [UInt8](firmware))
+        #expect(second.commands.last == NRF52HCI.stopDataPacket)
+    }
+
+    @Test func aBoardThatKeepsDroppingIsEventuallyReported() async throws {
+        let flasher = NRF52SerialDFUFlasher(portPath: "/dev/cu.fake", package: NRF52DFUPackage(initPacket: Data([1]), firmware: Data(repeating: 1, count: 600)),
+                                            waitScale: 0, touchPort: {}, openPort: { DroppingSerialDFU(dropAfter: 1) })
+        await #expect(throws: SerialError.self) { try await flasher.run { _, _ in } }
+    }
+}

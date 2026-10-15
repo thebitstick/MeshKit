@@ -11,6 +11,7 @@ final class FirmwareModel {
     let vendor: FirmwareVendor
     var isLoading = false
     var error: String?
+    var usingSavedLists = false
     var query = ""
 
     var role: MeshCoreRole = .companion
@@ -139,6 +140,7 @@ final class FirmwareModel {
             }
         }
         guard generation == loadGeneration else { return }
+        usingSavedLists = DiskCache.servedStale
         applyAutoSelect()
     }
 
@@ -171,6 +173,38 @@ final class FirmwareModel {
             if let b = mtVisibleBoards.first(where: { $0.slug.lowercased().contains(pick) || $0.displayName.lowercased().contains(pick) }) { mtSelectedSlug = b.slug; autoSelect = nil }
         }
     }
+
+    /// The best board in the current list for a name such as "Heltec T096" or "Seeed Wio Tracker L1", if any matches well.
+    func bestBoard(matching hint: String) -> String? {
+        let key = "\(vendor.rawValue)|\(selectedRelease?.tagName ?? "")|\(role.rawValue)|\(sourceID ?? "")|\(mtSelectedVersion ?? "")|\(mtBoards.count)|\(showCommunityBoards)|\(hint)"
+        if let known = boardMatches[key] { return known }
+        let result = computeBestBoard(matching: hint)
+        boardMatches[key] = .some(result)
+        return result
+    }
+
+    @ObservationIgnored private var boardMatches: [String: String?] = [:]
+
+    private func computeBestBoard(matching hint: String) -> String? {
+        switch vendor {
+        case .meshcore:
+            let all = selectedRelease.map { FirmwareBoardGroup.groups(from: ReleaseClient.builds(from: $0, role: role, source: source?.id)) } ?? []
+            return all.compactMap { g in FuzzyMatch.score(hint, in: [g.title, g.board]).map { (g.id, $0) } }.max { $0.1 < $1.1 }?.0
+        case .meshtastic:
+            return mtVisibleBoards.compactMap { b in FuzzyMatch.score(hint, in: [b.displayName, b.slug]).map { (b.slug, $0) } }.max { $0.1 < $1.1 }?.0
+        }
+    }
+
+    func selectBoard(matching hint: String) {
+        guard let id = bestBoard(matching: hint) else { return }
+        query = ""
+        switch vendor {
+        case .meshcore: selectedBoardID = id
+        case .meshtastic: mtSelectedSlug = id
+        }
+    }
+
+    var hasSelection: Bool { vendor == .meshcore ? selectedBoardID != nil : mtSelectedSlug != nil }
 
     func refresh() async {
         mtAllReleases = []; releaseCache = [:]; mtBoardCache = [:]
@@ -208,7 +242,35 @@ final class FirmwareModel {
 
     func meshCoreSerialDFURequest(model: AppModel) -> FlashRequest? {
         guard let group = selectedGroup else { return nil }
-        return .meshCoreSerialDFU(group, connection: group.build(for: effectiveConnection(for: group))?.connection, model: model)
+        return .meshCoreSerialDFU(group, connection: group.build(for: effectiveConnection(for: group))?.connection, clean: mcMode == .fresh, model: model)
+    }
+
+    /// A nRF52 board that is plugged in and running is installed over its serial port, with the bootloader drive as the
+    /// fallback; with a drive already mounted, or on other boards, the usual install.
+    func meshCoreInstallRequest(model: AppModel) -> FlashRequest? {
+        guard let group = selectedGroup, let build = group.build(for: effectiveConnection(for: group)), build.isUF2,
+              build.artifacts.contains(where: { $0.kind == .nrfDFUPackage }), model.uf2Volumes.isEmpty, !model.dfuCandidatePorts.isEmpty,
+              var serial = meshCoreSerialDFURequest(model: model) else { return withMismatchNote(meshCoreRequest(model: model), model: model) }
+        serial.fallback = { [unowned model] in model.firmware.meshCoreRequest(model: model) }
+        return withMismatchNote(serial, model: model)
+    }
+
+    /// A warning at the top of the sheet when the board that is plugged in looks like a different one from the firmware's.
+    /// Installing over USB checks only the Bluetooth stack, not the board, so this is the one guard against the wrong file.
+    private func withMismatchNote(_ request: FlashRequest?, model: AppModel) -> FlashRequest? {
+        guard var request, let detected = model.detectedBoard, let match = bestBoard(matching: detected), match != (vendor == .meshcore ? selectedBoardID : mtSelectedSlug) else { return request }
+        let chosen = vendor == .meshcore ? selectedGroup?.title : mtSelectedBoard?.displayName
+        request.notes.insert(.danger("This firmware is for \(chosen ?? "another board"), but the board plugged in looks like \(detected)."), at: 0)
+        return request
+    }
+
+    func meshtasticInstallRequest(model: AppModel) -> FlashRequest? {
+        guard let board = mtSelectedBoard, let release = mtSelectedRelease, board.isNRF52, model.uf2Volumes.isEmpty, !model.dfuCandidatePorts.isEmpty else {
+            return withMismatchNote(meshtasticRequest(), model: model)
+        }
+        var serial = FlashRequest.meshtasticSerialDFU(board, release: release, clean: mtMode == .fresh)
+        serial.fallback = { [unowned model] in model.firmware.meshtasticRequest() }
+        return withMismatchNote(serial, model: model)
     }
 
     func meshtasticRequest() -> FlashRequest? {

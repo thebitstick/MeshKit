@@ -518,3 +518,116 @@ import Testing
         try? FileManager.default.removeItem(at: backupDir)
     }
 }
+
+extension HardwareFirmwareTests {
+    /// Sets a name and location on a connected MeshCore companion so a conversion has something to carry.
+    @Test func setLocationOnCompanion() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "set-location" else { return }
+        let (client, _, _) = try await Self.companion(path)
+        try await client.setName("Carry Test")
+        try await client.setLocation(latitude: 41.9, longitude: -87.65)
+        let (_, me) = try await client.handshake()
+        print("COMPANION", me.name, me.latitude, me.longitude)
+        #expect(me.name == "Carry Test" && abs(me.latitude - 41.9) < 1e-4 && abs(me.longitude + 87.65) < 1e-4)
+        await client.stop()
+    }
+
+    @Test func readCompanionIdentity() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "read-companion" else { return }
+        let (client, _, me) = try await Self.companion(path)
+        print("COMPANION", me.name, me.latitude, me.longitude, "shares location in adverts:", me.advertLocationShared)
+        await client.stop()
+    }
+
+    @Test func readMeshtasticIdentity() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "read-meshtastic" else { return }
+        let (client, state) = try await Self.meshtastic(path)
+        let mine = state.nodes.first { $0.num == state.myNodeNum }
+        print("MESHTASTIC", state.owner?.longName ?? "?", state.owner?.shortName ?? "?",
+              Double(mine?.position.latitudeI ?? 0) / 1e7, Double(mine?.position.longitudeI ?? 0) / 1e7,
+              "fixed:", state.position?.fixedPosition ?? false)
+        await client.stop()
+    }
+}
+
+extension HardwareFirmwareTests {
+    /// Finds how long a node name the connected companion keeps, then puts the old name back.
+    @Test func companionNameLimit() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "name-limit" else { return }
+        let (client, _, original) = try await Self.companion(path)
+        let long = String(repeating: "abcdefghij", count: 6)
+        try? await client.setName(long)
+        let (_, after) = try await client.handshake()
+        print("NAMELIMIT kept", after.name.utf8.count, "of", long.utf8.count, after.name)
+        let multi = String(repeating: "é", count: 40)
+        try? await client.setName(multi)
+        let (_, after2) = try await client.handshake()
+        print("NAMELIMIT multibyte kept", after2.name.utf8.count, "bytes,", after2.name.count, "chars")
+        try await client.setName(original.name)
+        await client.stop()
+    }
+}
+
+extension HardwareFirmwareTests {
+    /// Switches location sharing on, reads it back, and puts it back as it was.
+    @Test func companionLocationSharing() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "share-location" else { return }
+        let (client, _, original) = try await Self.companion(path)
+        print("SHARING before", original.advertLocationShared)
+        try await client.setLocationSharing(!original.advertLocationShared, current: original)
+        let (_, flipped) = try await client.handshake()
+        print("SHARING after", flipped.advertLocationShared, "telemetry", original.telemetryModes, "->", flipped.telemetryModes, "manual", original.manualAddContacts, "->", flipped.manualAddContacts)
+        #expect(flipped.advertLocationShared == !original.advertLocationShared)
+        #expect(flipped.telemetryModes == original.telemetryModes && flipped.manualAddContacts == original.manualAddContacts && flipped.multiAcks == original.multiAcks)
+        try await client.setLocationSharing(original.advertLocationShared, current: flipped)
+        let (_, restored) = try await client.handshake()
+        print("SHARING restored", restored.advertLocationShared)
+        #expect(restored.advertLocationShared == original.advertLocationShared)
+        await client.stop()
+    }
+}
+
+extension HardwareFirmwareTests {
+    /// The carry-over step on its own, the way the app runs it after a conversion.
+    @Test func carryOverToCompanion() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "carry-companion" else { return }
+        let identity = NodeIdentity(name: "Carry Check", latitude: 41.9, longitude: -87.65)
+        try await IdentityTransfer.carryOver(identity, toCompanionAt: { try await IdentityTransfer.openPort(path) }, logger: { print("  log:", $0) })
+        print("CARRY done; waiting before reading back")
+        try await Task.sleep(for: .seconds(8))
+        let (client, _, me) = try await Self.companion(path)
+        print("CARRY readback", me.name, me.latitude, me.longitude)
+        #expect(me.name == "Carry Check" && abs(me.latitude - 41.9) < 1e-4)
+        await client.stop()
+    }
+}
+
+extension HardwareFirmwareTests {
+    /// A clean install followed at once by the carry-over, the way Convert does it.
+    @Test func cleanInstallThenCarry() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step == "install-carry" else { return }
+        let (merged, name) = try await Self.mergedImage(role: .companion)
+        try await HardwareTests.flash(MeshCoreImage.cleanJob(merged: merged, name: name), path: path, backup: false)
+        let identity = NodeIdentity(name: "Fresh Carry", latitude: 41.9, longitude: -87.65)
+        let started = Date()
+        try await IdentityTransfer.carryOver(identity, toCompanionAt: { try await IdentityTransfer.openPort(path) }, logger: { print("  log:", $0.prefix(60)) })
+        print("CARRY finished after", Int(Date().timeIntervalSince(started)), "s")
+        try await Task.sleep(for: .seconds(10))
+        let (client, _, me) = try await Self.companion(path)
+        print("CARRY readback", me.name, me.latitude, me.longitude)
+        #expect(me.name == "Fresh Carry")
+        await client.stop()
+    }
+}
+
+extension HardwareFirmwareTests {
+    /// Writes a saved flash image back and reads the repeater's name and key, without comparing against a stored snapshot.
+    @Test func restoreImageOnly() async throws {
+        guard let path = HardwareTests.port, HardwareTests.step.hasPrefix("restore-only:") else { return }
+        let file = String(HardwareTests.step.dropFirst("restore-only:".count))
+        try await HardwareTests.flash(.single(try Data(contentsOf: URL(fileURLWithPath: file)), name: "backup"), path: path, backup: false)
+        try await Task.sleep(for: .seconds(8))
+        let (cli, ident) = try await HardwareTests.repeater(path)
+        print("RESTORED", ident, try await cli.run("get name"), try await cli.run("get public.key"))
+    }
+}

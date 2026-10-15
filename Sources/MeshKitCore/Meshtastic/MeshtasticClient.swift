@@ -95,10 +95,13 @@ public struct MeshtasticEdit: Sendable {
     public var shortName: String?
     public var lora: Config.LoRaConfig?
     public var device: Config.DeviceConfig?
-    public init(longName: String? = nil, shortName: String? = nil, lora: Config.LoRaConfig? = nil, device: Config.DeviceConfig? = nil) {
-        self.longName = longName; self.shortName = shortName; self.lora = lora; self.device = device
+    /// Pins the node at a position (which also turns fixed position on).
+    public var fixedPosition: (latitude: Double, longitude: Double)?
+    public init(longName: String? = nil, shortName: String? = nil, lora: Config.LoRaConfig? = nil, device: Config.DeviceConfig? = nil,
+                fixedPosition: (latitude: Double, longitude: Double)? = nil) {
+        self.longName = longName; self.shortName = shortName; self.lora = lora; self.device = device; self.fixedPosition = fixedPosition
     }
-    public var isEmpty: Bool { longName == nil && shortName == nil && lora == nil && device == nil }
+    public var isEmpty: Bool { longName == nil && shortName == nil && lora == nil && device == nil && fixedPosition == nil }
 }
 
 public actor MeshtasticClient {
@@ -320,6 +323,14 @@ public actor MeshtasticClient {
             try await awaitAck(try await sendAdmin { $0.setConfig = Config.with { $0.device = device } })
         }
         try await awaitAck(try await sendAdmin { $0.commitEditSettings = true })
+        if let fixed = edit.fixedPosition {
+            try await awaitAck(try await sendAdmin {
+                $0.setFixedPosition = Position.with {
+                    $0.latitudeI = Int32((fixed.latitude * 1e7).rounded())
+                    $0.longitudeI = Int32((fixed.longitude * 1e7).rounded())
+                }
+            })
+        }
     }
 
     public func syncClock() async throws {

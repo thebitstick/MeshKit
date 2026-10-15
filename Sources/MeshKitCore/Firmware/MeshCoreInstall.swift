@@ -7,8 +7,8 @@ public enum MeshCoreInstallMode: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
     public var blurb: String {
         switch self {
-        case .update: "Replaces the firmware and keeps the node's settings and identity."
-        case .fresh: "Erases the whole flash first. Use for a new board or when something is broken. The node's identity key and settings are lost."
+        case .update: "Keeps your settings and identity."
+        case .fresh: "Erases everything first. For new or broken boards. Identity key and settings are lost."
         }
     }
 }
