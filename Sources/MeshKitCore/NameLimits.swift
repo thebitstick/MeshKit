@@ -32,9 +32,30 @@ public enum NameLimits {
     }
 
     public static func used(_ text: String) -> Int { text.utf8.count }
+
+    /// Characters a repeater or room server refuses in its name (`set name` answers "Error, bad chars").
+    public static let repeaterForbidden: Set<Character> = ["[", "]", "\\", ":", ",", "?", "*"]
+
+    public static func repeaterForbiddenCharacters(in text: String) -> [Character] {
+        var seen: [Character] = []
+        for c in text where repeaterForbidden.contains(c) && !seen.contains(c) { seen.append(c) }
+        return seen
+    }
+
+    /// The name with each forbidden character replaced by a space, then runs of spaces collapsed.
+    public static func repeaterSafe(_ text: String) -> String {
+        guard text.contains(where: { repeaterForbidden.contains($0) }) else { return text }
+        let spaced = String(text.map { repeaterForbidden.contains($0) ? " " : $0 })
+        return spaced.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+    }
 }
 
 extension NodeIdentity {
+    /// The same node with a name a repeater or room server accepts: no forbidden characters, at most 23 bytes.
+    public func fittedForRepeater() -> NodeIdentity {
+        NodeIdentity(name: NameLimits.fit(NameLimits.repeaterSafe(name), bytes: NameLimits.meshCoreRepeater), latitude: latitude, longitude: longitude)
+    }
+
     /// The same node with a name that fits the firmware it is going to.
     public func fitted(toBytes bytes: Int) -> NodeIdentity {
         NodeIdentity(name: NameLimits.fit(name, bytes: bytes), latitude: latitude, longitude: longitude)

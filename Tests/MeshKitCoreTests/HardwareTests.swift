@@ -91,7 +91,10 @@ import Testing
 
     static func mergedRepeaterImage() async throws -> (data: Data, name: String) {
         let client = ReleaseClient()
-        let release = try #require(try await client.releases(for: .repeater, limit: 1).first)
+        // MESHKIT_REPEATER_VERSION (for example 1.17.1) picks an older release, to test updating from it.
+        let wanted = ProcessInfo.processInfo.environment["MESHKIT_REPEATER_VERSION"].map { "repeater-v\($0)" }
+        let releases = try await client.releases(for: .repeater, limit: 12)
+        let release = try #require(releases.first { wanted == nil || $0.tagName == wanted })
         let builds = ReleaseClient.builds(from: release, role: .repeater)
         let build = try #require(builds.first { $0.board == "Heltec_v3" })
         let artifact = try #require(build.artifacts.first { $0.kind == .espFullImage })
@@ -140,6 +143,29 @@ import Testing
         print("AFTER IDENT", ident)
         let after = try await Self.snapshot(cli)
         for (k, v) in after.sorted(by: { $0.key < $1.key }) { print("FRESH \(k) = \(v)") }
+        await cli.stop()
+    }
+
+    /// Installs a community build (the Observer firmware from agessaman/MeshCore) the way the app does for a user-added source.
+    @Test func observerInstall() async throws {
+        guard let path = Self.port, Self.step == "observer" else { return }
+        let client = ReleaseClient(repository: "agessaman/MeshCore")
+        let releases = try await client.releases(for: .repeater, limit: 8)
+        let release = try #require(releases.first { $0.assets.count > 20 })
+        let builds = ReleaseClient.builds(from: release, role: .repeater, source: client.repository)
+        let build = try #require(builds.first { $0.board == "Heltec_v3" })
+        let artifact = try #require(build.artifacts.first { $0.kind == .espFullImage })
+        let merged = try Data(contentsOf: try await client.download(artifact))
+        print("OBSERVER IMAGE", release.tagName, artifact.asset.name, merged.count)
+        try await Self.flash(MeshCoreImage.cleanJob(merged: merged, name: artifact.asset.name), path: path, backup: false)
+        try await Task.sleep(for: .seconds(6))
+        let (cli, ident) = try await Self.repeater(path)
+        print("OBSERVER IDENT", ident)
+        let values = try await Self.snapshot(cli)
+        for (k, v) in values.sorted(by: { $0.key < $1.key }) { print("OBSERVER SETTING \(k) = \(v)") }
+        for extra in ["mqtt", "get mqtt", "wifi.status", "get wifi.ssid", "help"] {
+            print("OBSERVER CMD \(extra) ->", try await cli.run(extra, quiet: .milliseconds(400), timeout: .seconds(2)).debugDescription)
+        }
         await cli.stop()
     }
 

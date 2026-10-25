@@ -51,7 +51,7 @@ public enum CLICatalog {
         s("rxdelay", "RX delay", "Routing", .number(0...20), "Delay base for weaker signals; 0 disables."),
         s("dutycycle", "Duty cycle (%)", "Routing", .number(1...100), "Airtime budget. 50% equals airtime factor 1.0."),
         s("int.thresh", "Interference threshold", "Routing", .number(0...100), "Listen-before-talk threshold; 0 disables."),
-        s("agc.reset.interval", "AGC reset interval (s)", "Routing", .number(0...3600), "Multiple of 4; 0 disables."),
+        s("agc.reset.interval", "AGC reset interval (s)", "Routing", .number(0...1020), "Multiple of 4, up to 1020; 0 disables."),
         s("multi.acks", "Multi-acks", "Routing", .number(0...1), "0 off, 1 on."),
         s("flood.max", "Max flood hops", "Routing", .number(0...64), "Floods beyond this are not repeated."),
         s("flood.max.advert", "Max advert hops", "Routing", .number(0...64), "Hop limit for flooded adverts."),

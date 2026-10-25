@@ -144,6 +144,7 @@ struct MeshtasticConfigView: View {
             Button("Revert") { draft = original }.disabled(draft == original)
             Button(changeCount == 0 ? "Apply" : "Apply \(changeCount) change\(changeCount == 1 ? "" : "s")") { Task { await apply() } }
                 .buttonStyle(.borderedProminent).disabled(changeCount == 0 || isManaged)
+                .keyboardShortcut("s").help("Write the changes to the node (⌘S)")
         }
         .padding(12)
         .background(.bar)

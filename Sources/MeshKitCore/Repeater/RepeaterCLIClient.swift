@@ -122,11 +122,11 @@ public actor RepeaterCLIClient {
         public var errorDescription: String? { message }
     }
 
-    /// Runs a command and throws if the device answers with an error such as `ERR: clock cannot go backwards`.
+    /// Runs a command and throws if the device answers with an error such as `ERR: clock cannot go backwards` or `Error, bad chars`.
     @discardableResult
     public func runChecked(_ command: String, timeout: Duration = .seconds(3)) async throws -> String {
         let reply = try await run(command, timeout: timeout)
-        if reply.hasPrefix("ERR") { throw DeviceError(message: reply) }
+        if reply.lowercased().hasPrefix("err") { throw DeviceError(message: reply) }
         return reply
     }
 
@@ -142,6 +142,12 @@ public actor RepeaterCLIClient {
     public func identify() async throws -> (version: String, board: String) {
         let v = try await run("ver", quiet: .milliseconds(300), timeout: .seconds(1.5))
         let b = try await run("board", quiet: .milliseconds(300), timeout: .seconds(1.5))
-        return (v, b)
+        return (Self.lastLine(v), Self.lastLine(b))
+    }
+
+    /// A board that has only just booted can answer a stray line first ("Unknown command", an echo of the command);
+    /// the answer is the last line.
+    static func lastLine(_ reply: String) -> String {
+        reply.split(whereSeparator: \.isNewline).last.map { String($0).trimmingCharacters(in: .whitespaces) } ?? reply
     }
 }

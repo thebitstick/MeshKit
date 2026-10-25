@@ -174,6 +174,7 @@ struct CompanionConfigView: View {
             Button("Revert") { draft = original }.disabled(changeCount == 0)
             Button(changeCount == 0 ? "Apply" : "Apply \(changeCount) change\(changeCount == 1 ? "" : "s")") { Task { await apply() } }
                 .buttonStyle(.borderedProminent).disabled(changeCount == 0)
+                .keyboardShortcut("s").help("Write the changes to the device (⌘S)")
         }
         .padding(12)
         .background(.bar)
@@ -351,6 +352,7 @@ struct RepeaterConfigView: View {
             Button("Revert") { edits = [:] }.disabled(changed.isEmpty)
             Button(changed.isEmpty ? "Apply" : "Apply \(changed.count) change\(changed.count == 1 ? "" : "s")") { Task { await apply() } }
                 .buttonStyle(.borderedProminent).disabled(changed.isEmpty)
+                .keyboardShortcut("s").help("Write the changes to the device (⌘S)")
         }
         .padding(12)
         .background(.bar)
@@ -410,7 +412,11 @@ struct RepeaterConfigView: View {
             guard options.contains(value) else { return "must be one of \(options.joined(separator: ", "))" }
         case .onOff:
             guard ["on", "off"].contains(value) else { return "must be on or off" }
-        default: break
+        default:
+            if s.id == "name" {
+                let bad = NameLimits.repeaterForbiddenCharacters(in: value)
+                if !bad.isEmpty { return "can't contain \(bad.map(String.init).joined(separator: " "))" }
+            }
         }
         return nil
     }

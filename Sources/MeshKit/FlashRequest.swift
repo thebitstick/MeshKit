@@ -212,7 +212,14 @@ struct FlashRequest: Identifiable {
         if esp { notes.append(.keep("A backup of the whole flash is saved first, so you can put it all back.")) }
         if let identity {
             notes.append(.keep("Carried over: \(identity.summary)."))
-            if let original, original.name != identity.name { notes.append(.caution("The name is shortened to \(identity.name.utf8.count) bytes to fit: it was \(original.name.utf8.count).")) }
+            if let original, original.name != identity.name {
+                let bad = role == .companion || !toMeshCore ? [] : NameLimits.repeaterForbiddenCharacters(in: original.name)
+                if !bad.isEmpty {
+                    notes.append(.caution("A \(role.title.lowercased()) can't have \(bad.map { "“\($0)”" }.joined(separator: " ")) in its name; \(bad.count == 1 ? "it is" : "they are") replaced with spaces. The name becomes “\(identity.name)”."))
+                } else {
+                    notes.append(.caution("The name is shortened to \(identity.name.utf8.count) bytes to fit: it was \(original.name.utf8.count)."))
+                }
+            }
             if identity.hasLocation, toMeshCore {
                 notes.append(.info("Location sharing starts off on a new MeshCore install. Turn it on in Configure to advertise it."))
             }
@@ -255,7 +262,7 @@ struct FlashRequest: Identifiable {
     }
 
     static func convertToMeshCore(boardName: String, meshCoreSlug: String, role: MeshCoreRole = .companion, isESP32: Bool = false, identity original: NodeIdentity?) -> FlashRequest {
-        let identity = original.map { $0.fitted(toBytes: role == .companion ? NameLimits.meshCore : NameLimits.meshCoreRepeater) }
+        let identity = original.map { role == .companion ? $0.fitted(toBytes: NameLimits.meshCore) : $0.fittedForRepeater() }
         let roleName = role == .companion ? "USB companion" : role.title.lowercased()
         var request = FlashRequest(
             title: "Convert \(boardName) to MeshCore", subtitle: "A clean install of the latest stable MeshCore \(roleName)",

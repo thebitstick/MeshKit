@@ -175,6 +175,30 @@ import Testing
         await client.stop()
     }
 
+    @Test func forbiddenCharactersAreReplacedForARepeater() {
+        #expect(NameLimits.repeaterSafe("Hilltop, North: [A]") == "Hilltop North A")
+        #expect(NameLimits.repeaterSafe("Plain name") == "Plain name")
+        #expect(NameLimits.repeaterSafe("a\\b?c*d") == "a b c d")
+        #expect(NameLimits.repeaterForbiddenCharacters(in: "x, y, z:") == [",", ":"])
+        let id = NodeIdentity(name: "Hilltop, North Ridge Repeater Number One").fittedForRepeater()
+        #expect(id.name.utf8.count <= 23 && !id.name.contains(","))
+    }
+
+    @Test func aDeviceErrorIsRaisedWhateverTheCase() async throws {
+        let sim = SimulatedRepeaterTransport()
+        let client = RepeaterCLIClient(transport: sim)
+        await client.start()
+        // The simulator answers "Error: unknown config", as firmware answers "Error, bad chars".
+        await #expect(throws: RepeaterCLIClient.DeviceError.self) { try await client.runChecked("set bogus.setting 1") }
+        await client.stop()
+    }
+
+    @Test func aStrayFirstLineIsNotPartOfTheVersion() {
+        #expect(RepeaterCLIClient.lastLine("Unknown command\nver\nv1.18.0-81dbae5 (Build: 15-Oct-2026)") == "v1.18.0-81dbae5 (Build: 15-Oct-2026)")
+        #expect(RepeaterCLIClient.lastLine("Heltec V3") == "Heltec V3")
+        #expect(RepeaterCLIClient.lastLine("") == "")
+    }
+
     @Test func repeatersAreHeldToTwentyThreeBytes() {
         let long = NodeIdentity(name: String(repeating: "é", count: 20))
         #expect(long.fitted(toBytes: NameLimits.meshCoreRepeater).name.utf8.count <= 23)
